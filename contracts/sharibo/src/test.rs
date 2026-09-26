@@ -1302,6 +1302,26 @@ fn cpu_instruction_benchmarks() {
     let nullifier_hash = real_nullifier_hash(&env);
     let external_nullifier = real_external_nullifier_round0(&env);
     let proof = real_valid_proof(&env);
+
+    // ---- claim (rejection path: invalid recipient) ----
+    env.cost_estimate().budget().reset_default();
+    let res = client.try_claim(
+        &0u64,
+        &contract_id,
+        &nullifier_hash,
+        &external_nullifier,
+        &proof,
+    );
+    assert!(res.is_err());
+    let reject_cpu = env.cost_estimate().budget().cpu_instruction_cost();
+    std::println!("bench claim (reject invalid recipient): {reject_cpu} CPU instructions");
+    // Should be extremely cheap since it fails on the first line before any cryptography
+    assert!(
+        reject_cpu < 2_000_000,
+        "claim (reject) CPU {reject_cpu} exceeded 2M threshold (should be very cheap)"
+    );
+
+    env.cost_estimate().budget().reset_default();
     client.claim(
         &0u64,
         &recipient,

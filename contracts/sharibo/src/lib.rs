@@ -544,16 +544,14 @@ impl Contract {
     ///
     /// # Verification steps (in order)
     ///
-    /// 1. **Round fully funded.** `pot == contribution * size` exactly —
+    /// 1. **Recipient is not the contract.** A self-transfer zeroes the
+    ///    pot and burns the nullifier while leaving tokens stranded.
+    ///    Reverts with [`Error::InvalidRecipient`].
+    ///
+    /// 2. **Round fully funded.** `pot == contribution * size` exactly —
     ///    not ≥. Partial pots cannot be partially claimed; the round must
     ///    be complete, or else the admin must `cancel_circle` and refund.
     ///    Reverts with [`Error::RoundNotFunded`].
-    ///
-    /// 2. **External nullifier matches current round.** Computed
-    ///    off-chain by calling [`Self::compute_external_nullifier`] on
-    ///    `(circle_id, round)`; a mismatch means the proof was created
-    ///    for a different round/circle and cannot be replayed here.
-    ///    Reverts with [`Error::WrongRoundTag`].
     ///
     /// 3. **Nullifier unused.** A per-circle set stores every
     ///    `nullifier_hash` from a successful claim. Hitting an existing
@@ -561,7 +559,13 @@ impl Contract {
     ///    and is trying to double-spend. Reverts with
     ///    [`Error::AlreadyClaimed`].
     ///
-    /// 4. **Groth16 proof verifies.** Standard pairing check against the
+    /// 4. **External nullifier matches current round.** Computed
+    ///    off-chain by calling [`Self::compute_external_nullifier`] on
+    ///    `(circle_id, round)`; a mismatch means the proof was created
+    ///    for a different round/circle and cannot be replayed here.
+    ///    Reverts with [`Error::WrongRoundTag`].
+    ///
+    /// 5. **Groth16 proof verifies.** Standard pairing check against the
     ///    circle's [`VerificationKey`] with public inputs
     ///    `(nullifier_hash, root, external_nullifier)`. Reverts with
     ///    [`Error::InvalidProof`].
@@ -598,16 +602,16 @@ impl Contract {
         let key = DataKey::Circle(circle_id);
         let mut circle = load_active_circle(&env, circle_id);
 
-        // 1. round must be fully funded
-        if circle.pot != pot_target(&env, &circle) {
-            panic_with_error!(&env, Error::RoundNotFunded);
+        // 1. recipient must not be the contract itself — a self-transfer zeroes
+        //    the pot and burns the nullifier while leaving the tokens stranded
+        //    with no accounting or recovery path.
+        if recipient == env.current_contract_address() {
+            panic_with_error!(&env, Error::InvalidRecipient);
         }
 
-        // 2. the proof's external_nullifier must be bound to this exact circle+round
-        let expected_external_nullifier =
-            Self::compute_external_nullifier(&env, circle_id, circle.round);
-        if external_nullifier != expected_external_nullifier {
-            panic_with_error!(&env, Error::WrongRoundTag);
+        // 2. round must be fully funded
+        if circle.pot != pot_target(&env, &circle) {
+            panic_with_error!(&env, Error::RoundNotFunded);
         }
 
         // 3. this nullifier must not have claimed before (any round, this circle)
@@ -615,7 +619,14 @@ impl Contract {
             panic_with_error!(&env, Error::AlreadyClaimed);
         }
 
-        // 4. the ZK proof itself must verify against the circle's committed root
+        // 4. the proof's external_nullifier must be bound to this exact circle+round
+        let expected_external_nullifier =
+            Self::compute_external_nullifier(&env, circle_id, circle.round);
+        if external_nullifier != expected_external_nullifier {
+            panic_with_error!(&env, Error::WrongRoundTag);
+        }
+
+        // 5. the ZK proof itself must verify against the circle's committed root
         // Bind the recipient into the public inputs so the proof commits to
         // where the payout will land. Compute the same SHA-256-based
         // reduction used for external nullifier binding.
@@ -629,13 +640,6 @@ impl Contract {
         ];
         if !Self::verify_groth16(&env, &circle.vk, &proof, &public_inputs) {
             panic_with_error!(&env, Error::InvalidProof);
-        }
-
-        // 5. recipient must not be the contract itself — a self-transfer zeroes
-        //    the pot and burns the nullifier while leaving the tokens stranded
-        //    with no accounting or recovery path.
-        if recipient == env.current_contract_address() {
-            panic_with_error!(&env, Error::InvalidRecipient);
         }
 
         // effects
