@@ -247,6 +247,9 @@ pub enum Error {
 /// this to 100 ledgers (≈ 8 minutes at ~5 s/ledger) means that any write
 /// performed in the last few minutes of a circle's live window will refresh it
 /// to the full `LEDGER_EXTEND_TO` budget.
+/// Maximum number of members a circle can hold. Must equal 2^levels from circuits/config.json.
+pub const MAX_CIRCLE_SIZE: u32 = 16;
+
 /// Number of public signals the membership circuit exposes:
 /// [nullifierHash, root, externalNullifier, recipientHash].
 const PUBLIC_INPUT_COUNT: u32 = 4;
@@ -649,7 +652,18 @@ impl Contract {
         circle.round += 1;
         circle.contributors = Vec::new(&env);
         circle.round_started_ledger = env.ledger().sequence();
+        
+        // Bound the nullifier set size by clearing it at cycle boundaries.
+        // As defined in ADR 002 (turn ordering), members can claim exactly
+        // once per cycle. The nullifier hash only prevents double
+        // claiming within the same cycle; once the cycle advances, all
+        // external nullifiers change. We push first and then clear so the
+        // list starts empty at cycle boundaries.
         circle.nullifiers.push_back(nullifier_hash);
+        if circle.round % circle.size == 0 {
+            circle.nullifiers = Vec::new(&env);
+        }
+
         env.storage().persistent().set(&key, &circle);
         env.storage()
             .persistent()

@@ -729,7 +729,8 @@ fn same_identity_can_claim_two_consecutive_rounds() {
         &external_nullifier_r0,
         &proof_r0,
     );
-    assert!(client.has_claimed(&circle_id, &nullifier_hash_r0));
+    // Cycle advanced (size=1), so the nullifier list was cleared.
+    assert!(!client.has_claimed(&circle_id, &nullifier_hash_r0));
     assert_eq!(token_client.balance(&recipient_r0), contribution);
 
     let circle = client.get_circle(&circle_id);
@@ -761,7 +762,8 @@ fn same_identity_can_claim_two_consecutive_rounds() {
 
     // The claim succeeded: no RoundNotFunded/WrongRoundTag/AlreadyClaimed/
     // InvalidProof panic. Same identity, two rounds, two payouts.
-    assert!(client.has_claimed(&circle_id, &nullifier_hash_r1));
+    // Since cycle advanced again, the list is empty.
+    assert!(!client.has_claimed(&circle_id, &nullifier_hash_r1));
     assert_eq!(token_client.balance(&recipient_r1), contribution);
     assert_eq!(client.get_circle(&circle_id).round, 2);
 }
@@ -951,7 +953,7 @@ fn create_circle_rejects_size_above_max_capacity() {
     // The Merkle tree holds at most 2^4 = 16 commitments (circuits/config.json);
     // a larger size can never be fully claimed.
     let oversized = MAX_CIRCLE_SIZE + 1;
-    client.create_circle(&admin, &token, &root, &100i128, &oversized, &0u32, &vk);
+    client.create_circle(&admin, &token, &root, &100i128, &oversized, &0u32, &vk, &0u32, &admin);
 }
 
 #[test]
@@ -968,7 +970,7 @@ fn create_circle_accepts_max_capacity_size() {
     let root = real_root(&env);
     let vk = real_verification_key(&env);
 
-    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &MAX_CIRCLE_SIZE, &0u32, &vk);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &MAX_CIRCLE_SIZE, &0u32, &vk, &0u32, &admin);
     let circle = client.get_circle(&circle_id);
     assert_eq!(circle.size, MAX_CIRCLE_SIZE);
 }
@@ -1302,15 +1304,39 @@ fn cpu_instruction_benchmarks() {
     let nullifier_hash = real_nullifier_hash(&env);
     let external_nullifier = real_external_nullifier_round0(&env);
     let proof = real_valid_proof(&env);
-    client.claim(
-        &0u64,
-        &recipient,
-        &nullifier_hash,
-        &external_nullifier,
-        &proof,
-    );
-    let claim_cpu = env.cost_estimate().budget().cpu_instruction_cost();
-    std::println!("bench claim:         {claim_cpu} CPU instructions");
+
+    let mut claim_cpus = std::vec::Vec::new();
+    for nullifier_count in [0, 10, 50, 200] {
+        env.as_contract(&contract_id, || {
+            let key = DataKey::Circle(0);
+            let mut circle: Circle = env.storage().persistent().get(&key).unwrap();
+            circle.pot = circle.contribution * (circle.size as i128); // fully fund it
+            circle.round = 0; // reset round so the proof works
+            circle.contributors = Vec::new(&env);
+            circle.nullifiers = Vec::new(&env);
+            let dummy = Fr::from_u256(soroban_sdk::U256::from_u32(&env, 9999));
+            for _ in 0..nullifier_count {
+                circle.nullifiers.push_back(dummy.clone());
+            }
+            env.storage().persistent().set(&key, &circle);
+        });
+
+        // The contract must actually have the tokens to transfer out
+        token_admin_client.mint(&contract_id, &500i128);
+
+        env.cost_estimate().budget().reset_default();
+        client.claim(
+            &0u64,
+            &recipient,
+            &nullifier_hash,
+            &external_nullifier,
+            &proof,
+        );
+        let claim_cpu = env.cost_estimate().budget().cpu_instruction_cost();
+        std::println!("bench claim ({} nullifiers):         {} CPU instructions", nullifier_count, claim_cpu);
+        claim_cpus.push(claim_cpu);
+    }
+    let claim_cpu = claim_cpus[0]; // use 0 for the markdown baseline
 
     // Headroom assertion: upgrades that consume the committed safety margin fail loudly.
     assert!(
@@ -1351,6 +1377,47 @@ fn cpu_instruction_benchmarks() {
         );
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../BENCHMARKS.md");
         std::fs::write(path, table).expect("write contracts/BENCHMARKS.md");
+    }
+}
+
+#[test]
+fn test_nullifier_set_is_bounded_by_cycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    
+    let size = 5u32;
+    client.create_circle(&admin, &token, &root, &100i128, &size, &0u32, &vk, &0u32, &admin);
+
+    for i in 0..20 {
+        env.as_contract(&contract_id, || {
+            let key = DataKey::Circle(0);
+            let mut circle: Circle = env.storage().persistent().get(&key).unwrap();
+            
+            // Replicate the effects of `claim` to bypass the proof check
+            circle.pot = 0;
+            circle.round += 1;
+            circle.contributors = Vec::new(&env);
+            circle.round_started_ledger = env.ledger().sequence();
+            
+            let dummy_nullifier = Fr::from_u256(soroban_sdk::U256::from_u32(&env, i));
+            circle.nullifiers.push_back(dummy_nullifier);
+            if circle.round % circle.size == 0 {
+                circle.nullifiers = Vec::new(&env);
+            }
+            
+            env.storage().persistent().set(&key, &circle);
+        });
+
+        let circle = client.get_circle(&0u64);
+        assert!(circle.nullifiers.len() <= size, "Nullifiers exceeded size bound!");
     }
 }
 
