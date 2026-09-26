@@ -1,13 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Keypair } from "@stellar/stellar-sdk";
-import {
-  isConnected,
-  requestAccess,
-  isAllowed,
-  getAddress,
-  getNetworkDetails,
-  signTransaction as freighterSignTx
-} from "@stellar/freighter-api";
 import {
   generateIdentity,
   computeExternalNullifier,
@@ -59,7 +50,15 @@ import {
   FRIEND_BOT_RATE_LIMIT_MESSAGE,
 } from "./lib/friendbot";
 import styles from "./App.module.css";
-import { checkNetworkMatch } from "./lib/wallet.freighter";
+import {
+  createDemoSigner,
+  demoSignerFromSecret,
+  isFreighterAvailable,
+  randomDemoAddress,
+  selectSigner,
+  toShariboSigner,
+  type Signer,
+} from "./lib/wallet";
 import { Toaster } from "./components/Toaster";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -365,7 +364,8 @@ function CopyDebugBundleButton({
 }
 
 interface Member {
-  keypair: Keypair;
+  signer: Signer;
+  address: string;
   identity: Identity;
   funded: boolean;
   fundHash?: string;
@@ -659,14 +659,14 @@ export default function App() {
   const [events, setEvents] = useState<any[]>([]);
 
   const [contributionXlm, setContributionXlm] = useState(10);
-  const [admin, setAdmin] = useState<Keypair | null>(null);
+  const [admin, setAdmin] = useState<Signer | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [tree, setTree] = useState<MerkleTree | null>(null);
   const [circleId, setCircleId] = useState<CircleId | null>(null);
   const [hasFreighter, setHasFreighter] = useState(false);
 
   useEffect(() => {
-    isConnected().then((res) => setHasFreighter(res.isConnected)).catch(() => setHasFreighter(false));
+    isFreighterAvailable().then(setHasFreighter);
   }, []);
   const [round, setRound] = useState(0);
   const [pot, setPot] = useState(0n);
@@ -731,7 +731,7 @@ export default function App() {
     if (!admin || circleId === null) return;
     try {
       const { connect, getCircle } = await import("@sharibo/client");
-      const adminClient = await connect(NETWORK, admin);
+      const adminClient = await connect(NETWORK, await toShariboSigner(admin));
       const circle = await getCircle(adminClient, circleId);
       
       setPot(circle.pot);
@@ -744,7 +744,7 @@ export default function App() {
       setMembers((prev) =>
         prev.map((m) => {
           const hasFunded =
-            circle.contributors.includes(m.keypair.publicKey()) ||
+            circle.contributors.includes(m.address) ||
             Boolean(m.freighterKey && circle.contributors.includes(m.freighterKey));
           return { ...m, funded: hasFunded, pending: false };
         })
@@ -835,7 +835,7 @@ export default function App() {
         const client = await import("@sharibo/client");
         const { computeExternalNullifier, computeNullifierHash, connect, hasClaimed } = client;
         const external = await computeExternalNullifier(circleId, BigInt(round));
-        const adminClient = await connect(NETWORK, admin);
+        const adminClient = await connect(NETWORK, await toShariboSigner(admin));
         const results = await Promise.all(
           members.map(async (m) => {
             const nullifier = computeNullifierHash(m.identity.identityNullifier, external);
@@ -909,18 +909,22 @@ export default function App() {
     setScreen("landing");
   }
 
-  function loadState(parsed: any) {
+  async function loadState(parsed: any) {
     setCirclePhase("loading");
     setContributionXlm(parsed.contributionXlm);
-    setAdmin(Keypair.fromSecret(parsed.adminSecret));
-    
-    const loadedMembers = parsed.members.map((m: any) => ({
-      keypair: Keypair.fromSecret(m.secret),
-      identity: m.identity,
-      funded: false, // Will be synced from on-chain
-      fundHash: m.fundHash,
-      ineligible: m.ineligible ?? false,
-      pending: false,
+    setAdmin(await demoSignerFromSecret(parsed.adminSecret, NETWORK.networkPassphrase));
+
+    const loadedMembers = await Promise.all(parsed.members.map(async (m: any) => {
+      const signer = await demoSignerFromSecret(m.secret, NETWORK.networkPassphrase);
+      return {
+        signer,
+        address: await signer.publicKey(),
+        identity: m.identity,
+        funded: false, // Will be synced from on-chain
+        fundHash: m.fundHash,
+        ineligible: m.ineligible ?? false,
+        pending: false,
+      };
     }));
     setMembers(loadedMembers);
     
@@ -954,22 +958,26 @@ export default function App() {
       "Generating a fresh admin + 5 member identities and funding via friendbot…",
     );
     try {
-      const [{ Keypair }, client] = await Promise.all([
-        import("@stellar/stellar-sdk"),
-        import("@sharibo/client")
-      ]);
+      const client = await import("@sharibo/client");
       const { generateIdentity, MerkleTree, verificationKeyToContractFormat, connect, createCircle } = client;
 
       setBusy(t("busy.generating"));
-      const adminKp = Keypair.random();
-      await fundWithFriendbot(adminKp.publicKey());
+      const adminSigner = await createDemoSigner(NETWORK.networkPassphrase);
+      const adminAddress = await adminSigner.publicKey();
+      await fundWithFriendbot(adminAddress);
 
-      const newMembers: Member[] = Array.from({ length: CIRCLE_SIZE }, () => ({
-        keypair: Keypair.random(),
-        identity: generateIdentity(),
-        funded: false,
-        ineligible: false,
-      }));
+      const newMembers: Member[] = await Promise.all(
+        Array.from({ length: CIRCLE_SIZE }, async () => {
+          const signer = await createDemoSigner(NETWORK.networkPassphrase);
+          return {
+            signer,
+            address: await signer.publicKey(),
+            identity: generateIdentity(),
+            funded: false,
+            ineligible: false,
+          };
+        }),
+      );
 
       const newTree = MerkleTree.create(
         LEVELS,
@@ -981,19 +989,19 @@ export default function App() {
         r.json(),
       );
       const vk = verificationKeyToContractFormat(vkJson);
-      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, adminKp);
+      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, await toShariboSigner(adminSigner));
       const { result: newCircleId } = await createCircle(adminClient, {
-        admin: adminKp.publicKey(),
+        admin: adminAddress,
         token: TOKEN,
         root: newTree.root,
         contribution,
         size: CIRCLE_SIZE,
         vk,
         feeBps: 0,
-        feeRecipient: adminKp.publicKey(),
+        feeRecipient: adminAddress,
       });
 
-      setAdmin(adminKp);
+      setAdmin(adminSigner);
       setMembers(newMembers);
       setTree(newTree);
       setCircleId(makeCircleId(newCircleId));
@@ -1016,12 +1024,15 @@ export default function App() {
     setError(null);
     setBusy(t("fund.busy", { index: i + 1 }));
     try {
-      const [{ Keypair }, { connect, fund }] = await Promise.all([
-        import("@stellar/stellar-sdk"),
-        import("@sharibo/client")
-      ]);
+      const { connect, fund } = await import("@sharibo/client");
       const m = members[i];
-      await fundWithFriendbot(m.keypair.publicKey());
+      const signer = await selectSigner({
+        optedIn: false,
+        demo: m.signer,
+        appNetworkPassphrase: NETWORK.networkPassphrase,
+      });
+      const from = await signer.publicKey();
+      await fundWithFriendbot(from);
       
       // Set optimistic pending state
       setMembers((prev) =>
@@ -1030,10 +1041,10 @@ export default function App() {
         ),
       );
       
-      const memberClient = await connect(NETWORK, m.keypair);
+      const memberClient = await connect(NETWORK, await toShariboSigner(signer));
       const { hash } = await fund(memberClient, {
         circleId,
-        from: m.keypair.publicKey(),
+        from,
       });
       
       // Sync with on-chain state after submission
@@ -1063,53 +1074,14 @@ export default function App() {
     setError(null);
     setBusy(t("fund.busyFreighter", { index: i + 1 }));
     try {
-      const allowedRes = await isAllowed();
-      if (!allowedRes.isAllowed) {
-        await requestAccess();
-      }
-
-      const networkRes = await getNetworkDetails();
-      
-      // Check for network mismatch between wallet and app config
-      const mismatch = checkNetworkMatch(networkRes.network, NETWORK.networkPassphrase);
-      if (mismatch) {
-        throw new Error(
-          `Your Freighter wallet is connected to ${mismatch.walletNetwork}, ` +
-          `but this app is configured for ${mismatch.appNetwork}. ` +
-          `Please open Freighter, click the network selector in the upper right, and switch to ${mismatch.appNetwork}.`
-        );
-      }
-
-      const addressRes = await getAddress();
-      const pubKey = addressRes.address;
-      if (!pubKey) {
-        throw new Error(t("error.getAddress"));
-      }
-      
-      const freighterSigner = {
-        publicKey: pubKey,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        signTransaction: async (txXdr: string, opts?: any) => {
-          // Re-check network before signing to catch mid-session network switches
-          const currentNetworkRes = await getNetworkDetails();
-          const currentMismatch = checkNetworkMatch(currentNetworkRes.network, NETWORK.networkPassphrase);
-          if (currentMismatch) {
-            throw new Error(
-              `Your Freighter wallet is connected to ${currentMismatch.walletNetwork}, ` +
-              `but this app is configured for ${currentMismatch.appNetwork}. ` +
-              `Please open Freighter, click the network selector in the upper right, and switch to ${currentMismatch.appNetwork}.`
-            );
-          }
-
-          const signedRes = await freighterSignTx(txXdr, {
-            networkPassphrase: currentNetworkRes.networkPassphrase
-          });
-          if (signedRes.error) {
-            throw new Error(signedRes.error.toString());
-          }
-          return signedRes.signedTxXdr;
-        }
-      };
+      const m = members[i];
+      const signer = await selectSigner({
+        optedIn: true,
+        demo: m.signer,
+        appNetworkPassphrase: NETWORK.networkPassphrase,
+        addressError: t("error.getAddress"),
+      });
+      const pubKey = await signer.publicKey();
 
       // Set optimistic pending state
       setMembers((prev) =>
@@ -1119,7 +1091,7 @@ export default function App() {
       );
 
       const { connect, fund } = await import("@sharibo/client");
-      const memberClient = await connect(NETWORK, freighterSigner);
+      const memberClient = await connect(NETWORK, await toShariboSigner(signer));
       const { hash } = await fund(memberClient, {
         circleId,
         from: pubKey,
@@ -1159,10 +1131,8 @@ export default function App() {
     setRejection(null);
     setBusy(t("busy.claiming"));
     try {
-      const [{ Keypair }, { computeExternalNullifier, generateProof, verifyProofLocally, connect, claim, getCircle, hasClaimed }] = await Promise.all([
-        import("@stellar/stellar-sdk"),
-        import("@sharibo/client")
-      ]);
+      const { computeExternalNullifier, generateProof, verifyProofLocally, connect, claim, hasClaimed } =
+        await import("@sharibo/client");
 
       if (signal.aborted) return;
       const claimant = members[claimantIndex];
@@ -1212,15 +1182,15 @@ export default function App() {
       );
 
       setClaimStage("funding");
-      const recipient = Keypair.random();
-      await fundWithFriendbot(recipient.publicKey());
+      const recipient = await randomDemoAddress();
+      await fundWithFriendbot(recipient);
 
       if (signal.aborted) return;
       setClaimStage("submitting");
-      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, admin);
+      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, await toShariboSigner(admin));
       const { hash } = await claim(adminClient, {
         circleId,
-        recipient: recipient.publicKey(),
+        recipient,
         nullifierHash: generated.nullifierHash,
         externalNullifier: generated.externalNullifier,
         proof: generated.proof,
@@ -1230,7 +1200,7 @@ export default function App() {
       setProof(generated.proof);
       setNullifierHash(generated.nullifierHash);
       setClaimResult({
-        recipient: recipient.publicKey(),
+        recipient,
         hash,
         proofDurationMs: generated.provingTimeMs,
         verifyTimeMs,
@@ -1259,17 +1229,14 @@ export default function App() {
     setRejection(null);
     setBusy(t("busy.refunding"));
     try {
-      const [{ Keypair }, { connect, fund, computeExternalNullifier, claim }] = await Promise.all([
-        import("@stellar/stellar-sdk"),
-        import("@sharibo/client")
-      ]);
+      const { connect, fund, computeExternalNullifier, claim } = await import("@sharibo/client");
       // Fund round `round` again so this exercises the nullifier-reuse
       // check specifically, not just "the pot is empty" — the same
       // proof's nullifier gets rejected even against a fresh, funded round.
-      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, admin);
+      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, await toShariboSigner(admin));
       for (const m of members) {
-        const memberClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, m.keypair);
-        await fund(memberClient, { circleId, from: m.keypair.publicKey() });
+        const memberClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, await toShariboSigner(m.signer));
+        await fund(memberClient, { circleId, from: m.address });
       }
       const freshExternalNullifier = await computeExternalNullifier(
         circleId,
@@ -1279,7 +1246,7 @@ export default function App() {
       setBusy(t("busy.replaying"));
       await claim(adminClient, {
         circleId,
-        recipient: Keypair.random().publicKey(),
+        recipient: await randomDemoAddress(),
         nullifierHash,
         externalNullifier: freshExternalNullifier,
         proof,
@@ -1315,7 +1282,7 @@ export default function App() {
     setBusy(t("cancel.busy"));
     try {
       const { connect, cancelCircle } = await import("@sharibo/client");
-      const adminClient = await connect(NETWORK, admin);
+      const adminClient = await connect(NETWORK, await toShariboSigner(admin));
       await cancelCircle(adminClient, { circleId });
       
       // Sync with on-chain state after cancellation
@@ -1515,9 +1482,9 @@ export default function App() {
           {members.map((m, i) => (
             <div key={i} className={`member ${m.funded ? "funded" : ""} ${m.pending ? "pending" : ""}`}>
               <span className="member-addr">
-                {t("fund.memberLabel", { index: i + 1 })} · {short(m.keypair.publicKey())}
+                {t("fund.memberLabel", { index: i + 1 })} · {short(m.address)}
                 <CopyButton
-                  value={m.keypair.publicKey()}
+                  value={m.address}
                   label={t("fund.memberAddressLabel", { index: i + 1 })}
                 />
               </span>
