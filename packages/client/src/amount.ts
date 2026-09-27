@@ -1,39 +1,43 @@
-export const STROOPS_PER_XLM = 10_000_000n;
+import { STROOPS_PER_XLM } from "./constants";
 
-export function xlmToStroops(xlm: number | bigint | string): bigint {
-  if (typeof xlm === "bigint") {
-    return xlm * STROOPS_PER_XLM;
-  }
-
-  const value = typeof xlm === "number" ? xlm.toString() : xlm.trim();
-
-  if (!/^[+-]?\d+(\.\d+)?$/.test(value)) {
-    throw new RangeError(`Invalid XLM value: ${String(xlm)}`);
-  }
-
-  const negative = value.startsWith("-");
-  const [wholePart, fractionalPart = ""] = value.replace(/^[+-]/, "").split(".");
-
-  const wholeUnits = BigInt(wholePart || "0");
-  const adjustedFraction = fractionalPart.padEnd(7, "0").slice(0, 7);
-  let result = wholeUnits * STROOPS_PER_XLM + BigInt(adjustedFraction || "0");
-
-  if (fractionalPart.length > 7 && fractionalPart[7] >= "5") {
-    result += 1n;
-  }
-
-  return negative ? -result : result;
+/**
+ * Convert a whole XLM amount to stroops.
+ *
+ * @param xlm - A decimal XLM amount as a string, e.g. `"1.5"`.
+ * @returns The equivalent amount in stroops.
+ */
+export function xlmToStroops(xlm: string): bigint {
+  const [whole, fraction = ""] = xlm.split(".");
+  const paddedFraction = fraction.padEnd(7, "0").slice(0, 7);
+  return BigInt(whole) * STROOPS_PER_XLM + BigInt(paddedFraction);
 }
 
-export function stroopsToXlm(stroops: bigint): bigint {
+/**
+ * Convert stroops to whole XLM, discarding any fractional remainder.
+ *
+ * This is a **lossy** conversion: `bigint` division truncates toward zero, so
+ * any sub-XLM remainder is silently dropped. For example `9_999_999n` stroops
+ * (0.9999999 XLM) returns `0n`, and `-9_999_999n` also returns `0n`.
+ *
+ * If you need the precise value with all seven decimal digits preserved, use
+ * {@link formatXlm}, which returns the full amount as a string.
+ *
+ * @param stroops - The amount in stroops.
+ * @returns The whole-XLM portion, truncated toward zero.
+ */
+export function stroopsToWholeXlm(stroops: bigint): bigint {
   return stroops / STROOPS_PER_XLM;
 }
 
+/**
+ * Format a stroop amount as a decimal XLM string, preserving all seven
+ * fractional digits.
+ *
+ * @param stroops - The amount in stroops.
+ * @returns The XLM amount as a string, e.g. `"0.9999999"`.
+ */
 export function formatXlm(stroops: bigint): string {
-  const negative = stroops < 0n;
-  const absolute = negative ? -stroops : stroops;
-  const whole = absolute / STROOPS_PER_XLM;
-  const remainder = absolute % STROOPS_PER_XLM;
-  const fraction = remainder.toString().padStart(7, "0");
-  return `${negative ? "-" : ""}${whole}.${fraction}`;
+  const whole = stroops / STROOPS_PER_XLM;
+  const fraction = stroops % STROOPS_PER_XLM;
+  return `${whole}.${fraction.toString().padStart(7, "0")}`;
 }
