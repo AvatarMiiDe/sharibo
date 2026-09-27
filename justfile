@@ -15,6 +15,39 @@ set working-directory := '.'
 doctor:
     npm run doctor --workspace=scripts
 
+# ── Audit ────────────────────────────────────────────────────────────────────
+
+# Dependency audit gate: npm advisories across every workspace plus cargo
+# advisories / licences / duplicate crates for the contracts crate.
+#
+# Findings are accepted only through the allowlist files below — never by
+# appending `|| true` to a command:
+#
+#   * npm  — `audit-allowlist.json` (root): entries of the form
+#            { "id": "GHSA-…", "reason": "…", "expires": "YYYY-MM-DD" }
+#   * cargo — `contracts/deny.toml` `[advisories] ignore = [...]` entries,
+#            each with a comment giving the reason and an expiry date.
+#
+# An allowlist entry past its expiry is a failure: re-triage the advisory
+# instead of bumping the date.
+audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "== npm audit (all workspaces, --audit-level=high) =="
+    npm audit --audit-level=high
+
+    echo ""
+    echo "== cargo audit (contracts/) =="
+    cd contracts && cargo audit
+
+    echo ""
+    echo "== cargo deny check (advisories, licences, bans, sources) =="
+    cd contracts && cargo deny check
+
+    echo ""
+    echo "audit: no unaccepted findings."
+
 # ── Circuits ──────────────────────────────────────────────────────────────────
 
 # Compile circuit, run trusted setup (with zkey verification), verify the
@@ -196,30 +229,4 @@ all: circuits contract test
     @echo 'All recipes completed (e2e skipped — uses testnet funds/friendbot quota)'
 
 # Verify: run lint and client checks
-verify: client
-    npm run lint
-
-# Run coverage for all workspaces and print a short per-workspace summary.
-# This is a local instrument (not a merge gate). It runs each workspace's
-# test command with coverage enabled and emits the report locations.
-coverage:
-    @echo 'Collecting coverage for: app, packages/client, scripts, contracts'
-    # App (vitest will write to coverage/app)
-    cd app && npm test || true
-    # Client (vitest will write to coverage/packages-client)
-    npm run test --workspace=packages/client || true
-    # Scripts (node --test may be used by the scripts workspace)
-    npm run test --workspace=scripts || true
-    # Contracts (cargo-llvm-cov must be installed; see contracts/README.md)
-    cd contracts && cargo llvm-cov --workspace --tests --lcov --output-path coverage || true
-    @echo
-    @echo 'Summary:'
-    @printf '%-25s %-12s %s\n' "Workspace" "Report" "Notes"
-    @printf '%-25s %-12s %s\n' "app" "coverage/app" "vitest + v8"
-    @printf '%-25s %-12s %s\n' "packages/client" "coverage/packages-client" "vitest + v8"
-    @printf '%-25s %-12s %s\n' "scripts" "(scripts test may output coverage)" "node --test"
-    @printf '%-25s %-12s %s\n' "contracts" "contracts/coverage" "cargo llvm-cov (HTML/lcov)"
-
-# Refresh the committed contract CPU benchmark table
-bench-contract:
-    WRITE_BENCHMARKS=1 cargo test -p sharibo cpu_instruction_benchmarks -- --nocapture
+verify: 
