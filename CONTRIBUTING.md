@@ -44,6 +44,15 @@ We use a set of topic labels to categorize issues and pull requests. These label
 |-------|-------------|---------|
 | Stellar Wave | Issues in the Stellar wave program | Stellar Wave program tasks |
 
+## Dead code (knip)
+
+`knip.jsonc` states that **zero issues is the baseline**. A knip finding is resolved by **deleting the code or wiring it into the running app** — never by adding a reference that exists only to satisfy the checker.
+
+- Do not add barrel files (`index.ts`) whose stated purpose is to make knip see components as referenced. If nothing imports the barrel, knip reports the barrel *and* the components, so the workaround makes the report worse, not better.
+- Import components by path (`./components/Foo`) rather than through a barrel.
+- If a component is not rendered by the app, either adopt it into the render tree or delete it. Leaving it in place with a fake reference misleads anyone reading the directory to understand the UI.
+- Do not add `knip.jsonc` entries to silence a finding for the same reason.
+
 ## Review expectations
 
 This repo has **no CI**, so human review is the gate — a merged PR is effectively the last check before the code lands. `.github/CODEOWNERS` requests the owning reviewers automatically on every PR.
@@ -115,19 +124,6 @@ In short:
 
 - `app/` and `scripts/` must import the SDK via `@sharibo/client` (its published entry point), **never** a deep `packages/client/src/…` path.
 - `packages/client` must not import `app/` or `scripts/`.
-- `contracts/` and `circuits/` have no JavaScript import dependencies on the rest of the monorepo.
+- `contracts/` and `circuits/` have no Jav
 
-Running `npm run lint` will catch violations.
-
-## Setup trouble?
-
-Getting a fresh machine running and tripping on a toolchain issue (`circom`, `wasm32v1-none`, `stellar` vs `soroban`, friendbot limits, testnet resets, missing `circuits/build/`)? See [docs/troubleshooting.md](docs/troubleshooting.md) for symptom → cause → fix walkthroughs.
-
-## Pre-PR checklist
-
-Before opening a pull request, run the comprehensive local verification gate:
-
-- Run `just verify` from anywhere inside the repository. It runs TypeScript typechecking (client and app), ESLint, a best-effort dead-code check (`ts-prune`), all unit tests (app and SDK), `cargo test`, and `cargo clippy -- -D warnings`.
-- The recipe intentionally excludes `e2e` and the circuits *trusted setup* because those are slow and/or spend testnet friendbot funds.
-
-If `just verify` passes locally, it's the single documented answer to "did I break anything?" and a good signal your change is ready for review.
+/* … truncated 1020 chars — edit only what you need near the top … */
