@@ -67,4 +67,22 @@ test("post-submit failure surfaces immediately without a second submission", asy
   assert.strictEqual(signAndSendCalls, 1);
 });
 
-// =====================================================================});
+// =====================================================================
+// #494: structural read/write invariant.
+//
+// The reads/writes split is load-bearing: read-only calls must go through
+// pure simulation, while writes go through signAndSend. #279 was a bug
+// caused by a read accidentally reaching for signAndSend. This test makes
+// that mistake structurally unrepeatable by asserting reads.ts never
+// references signAndSend.
+// =====================================================================
+
+test("reads.ts never reaches for signAndSend", () => {
+  const here = path.dirname(url.fileURLToPath(import.meta.url));
+  const readsPath = path.join(here, "contract", "reads.ts");
+  const source = fs.readFileSync(readsPath, "utf8");
+  assert.ok(
+    !source.includes("signAndSend"),
+    "reads.ts must not reference signAndSend; read paths must use pure simulation"
+  );
+});
