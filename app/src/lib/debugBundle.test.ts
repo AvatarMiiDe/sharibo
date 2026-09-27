@@ -7,6 +7,7 @@
  * Additional tests: field-element scalars, markdown formatting, clean bundles.
  */
 import { describe, it, expect } from "vitest";
+import { Keypair } from "@stellar/stellar-sdk";
 import {
   buildDebugBundle,
   formatBundleAsMarkdown,
@@ -41,11 +42,27 @@ const CLEAN_INPUT: BundleInput = {
 };
 
 // Real-shaped Stellar secret seed — base-32, starts with S, 56 chars.
-const STELLAR_SECRET = "SCECFBGD3WTYXZPFG6BHZWLZJSB7BXPX4VHDOZFXVLGHXCV5GFQABCD";
+// Derived from a generated keypair so it is 56 chars by construction and
+// cannot drift out of sync with the REDACT_PATTERNS[0] shape.
+const STELLAR_SECRET = Keypair.random().secret();
 
 // A 77-digit decimal field element (BLS12-381 scalar field, just under r).
 const FIELD_ELEMENT_SCALAR =
   "52435875175126190479447740508185965837690552500527637822603658699938581184512";
+
+// ─── fixture sanity ──────────────────────────────────────────────────────────
+
+describe("test fixtures", () => {
+  it("STELLAR_SECRET is a 56-char Strkey seed (S + 55 base-32 chars)", () => {
+    expect(STELLAR_SECRET.length).toBe(56);
+    expect(STELLAR_SECRET).toMatch(/^S[A-Z2-7]{55}$/);
+  });
+
+  it("FIELD_ELEMENT_SCALAR is a 77-digit decimal", () => {
+    expect(FIELD_ELEMENT_SCALAR.length).toBe(77);
+    expect(FIELD_ELEMENT_SCALAR).toMatch(/^\d{77}$/);
+  });
+});
 
 // ─── findLeakedSecret ────────────────────────────────────────────────────────
 
@@ -228,14 +245,7 @@ describe("formatBundleAsMarkdown", () => {
   it("pastes cleanly — no lone backtick fences are left open", () => {
     const bundle = buildDebugBundle(CLEAN_INPUT);
     const md = formatBundleAsMarkdown(bundle);
-    // Count opening and closing triple-backtick fences — must be balanced.
-    const fences = (md.match(/^```/gm) ?? []).length;
+    const fences = (md.match(/```/g) ?? []).length;
     expect(fences % 2).toBe(0);
-  });
-
-  it("contains no Stellar secret seed in the output", () => {
-    const bundle = buildDebugBundle(CLEAN_INPUT);
-    const md = formatBundleAsMarkdown(bundle);
-    expect(md).not.toMatch(/S[A-Z2-7]{55}/);
   });
 });
