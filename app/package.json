@@ -1,49 +1,35 @@
 {
-  "name": "@sharibo/app",
-  "version": "0.0.0",
+  "name": "app",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "description": "Web frontend for Sharibo ROSCA platform",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/crackedstudio/sharibo.git",
-    "directory": "app"
-  },
-  "keywords": [
-    "stellar",
-    "soroban",
-    "rosca",
-    "react",
-    "frontend"
-  ],
   "scripts": {
-    "sync-circuit": "node scripts/sync-circuit.mjs",
-    "dev:circuits": "node scripts/sync-circuit.mjs --watch",
     "dev": "vite",
-    "dev:full": "npm run sync-circuit && vite",
-    "build": "npm run sync-circuit && vite build",
-    "preview": "vite preview",
-    "test": "vitest run"
+    "build": "tsc -b && vite build",
+    "build:analyze": "ANALYZE=1 npm run build",
+    "lint": "eslint .",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@sharibo/client": "*",
-    "@stellar/freighter-api": "^6.0.1",
-    "@stellar/stellar-sdk": "^16.0.1",
-    "buffer": "^6.0.3",
-    "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "@noir-lang/noir_js": "^1.0.0-beta.9",
+    "@noir-lang/noirc_abi": "^1.0.0-beta.9",
+    "@noir-lang/acvm_js": "^1.0.0-beta.9",
+    "@aztec/bb.js": "^0.82.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@testing-library/dom": "^10.4.0",
-    "@testing-library/jest-dom": "7.0.0",
-    "@testing-library/react": "16.3.2",
-    "@types/react": "^19.2",
-    "@types/react-dom": "^19.2",
-    "@vitejs/plugin-react": "6.0.3",
-    "jsdom": "26.1.0",
-    "typescript": "6.0.3",
-    "vite": "8.1.3",
-    "vitest": "4.1.10"
+    "@eslint/js": "^9.30.1",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "eslint": "^9.30.1",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0",
+    "rollup-plugin-visualizer": "^6.0.3",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.35.1",
+    "vite": "^8.0.0"
   }
 }
