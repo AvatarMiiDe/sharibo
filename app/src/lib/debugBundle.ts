@@ -7,6 +7,16 @@
  * serialised bundle. Every field is explicitly allow-listed; a final regex
  * pass is the defence-in-depth backstop.
  *
+ * Redaction split (see #503):
+ * - Fields the build-time allow-list controls (network config, artifact
+ *   hashes, timings, user agent) are trusted. If a secret pattern matches
+ *   there, the allow-list itself is broken, so we THROW — the caller must
+ *   know the build-time guarantee failed.
+ * - Runtime-sourced fields (notably `lastError`, which can carry Stellar SDK
+ *   error payloads and XDR dumps) are untrusted. There we REDACT the match
+ *   with `[REDACTED]` and surface a visible warning, so the user can still
+ *   report their bug instead of getting an exception.
+ *
  * The output is formatted markdown — paste directly into a bug report body.
  */
 
@@ -66,6 +76,12 @@ export interface DebugBundle {
   artifactHashes: Record<string, string>;
   timings: Record<string, number>;
   userAgent: string;
+  /**
+   * Non-fatal redaction warnings raised while building the bundle. Present
+   * only when a runtime-sourced field matched a secret pattern and was
+   * redacted in place (see #503).
+   */
+  redactionWarnings?: string[];
 }
 
 // ─── redaction ──────────────────────────────────────────────────────────────
@@ -76,16 +92,39 @@ export interface DebugBundle {
  * - Stellar secret seeds: start with 'S', 56 base-32 chars.
  *   The Stellar SDK encodes secret keys as Strkey with version byte 0x90
  *   → always starts with 'S', always 56 chars, base-32 alphabet A-Z2-7.
- * - Identity scalars: 77-digit decimal bigints that represent field elements
- *   (identityNullifier / identitySecret from generateIdentity()). These are
- *   256-bit numbers, so ≥ 77 decimal digits long.
- *   (2^255 ≈ 5.8e76, so a field element is always ≥ 77 decimal digits.)
+ *   Matched case-insensitively for detection: canonical Strkey is uppercase,
+ *   but some logging paths lowercase the value, which would otherwise evade
+ *   the pattern. The canonical form is still documented above.
+ * - Muxed accounts (M…, 69 chars) and pre-auth tx (T…, 56 chars) are Strkeys
+ *   too. A muxed address is not secret key material, but it is account-
+ *   identifying, so we redact it deliberately rather than by omission.
+ * - Identity scalars: BLS12-381 field elements (identityNullifier /
+ *   identitySecret from generateIdentity()). These are 256-bit numbers, so
+ *   up to 78 decimal digits — but a scalar sampled in the low range (note
+ *   `randomFieldElement` samples 31 bytes per #66) or one with leading zeros
+ *   can be shorter. We therefore match a lower decimal floor (≥ 70 digits)
+ *   rather than the old ≥ 77, which was a floor, not a match.
+ * - Hex scalars: the same field elements rendered as hex (`0x…`, 64 hex
+ *   chars) appear in Stellar SDK error payloads and XDR dumps. We match
+ *   ≥ 60 hex chars, which is above the 56-char contract ID (C…) and the
+ *   64-char tx hash is deliberately excluded by requiring the run to be
+ *   longer than 64 OR prefixed with 0x — see HEX_SCALAR_PATTERN below.
  */
 export const REDACT_PATTERNS: RegExp[] = [
-  // Stellar secret seed: S + 55 chars from base-32 alphabet [A-Z2-7]
-  /S[A-Z2-7]{55}/g,
-  // Large decimal integer (≥77 digits) — field-element sized scalar
-  /\b\d{77,}\b/g,
+  // Stellar secret seed: S + 55 chars from base-32 alphabet [A-Z2-7].
+  // Case-insensitive for detection (canonical form is uppercase).
+  /S[A-Z2-7]{55}/gi,
+  // Muxed account Strkey: M + 68 base-32 chars (69 total).
+  /M[A-Z2-7]{68}/gi,
+  // Pre-auth tx Strkey: T + 55 base-32 chars (56 total).
+  /T[A-Z2-7]{55}/gi,
+  // Large decimal integer (≥70 digits) — field-element sized scalar.
+  // Lowered from 77 so low-range / leading-zero scalars are still caught.
+  /\b\d{70,}\b/g,
+  // Hex scalar: 0x-prefixed 60+ hex chars, or a bare 65+ hex run.
+  // Tuned so a 56-char contract ID (C…) and a 64-char tx hash are NOT
+  // flagged, while a 64-hex-char field element rendered as 0x… is.
+  /\b0x[0-9a-fA-F]{60,}\b|\b[0-9a-fA-F]{65,}\b/g,
 ];
 
 /**
@@ -101,16 +140,54 @@ export function findLeakedSecret(serialised: string): RegExp | null {
   return null;
 }
 
+/**
+ * Replace every secret-pattern match in `value` with `[REDACTED]`.
+ * Returns the redacted string and the patterns that fired (empty if clean).
+ */
+export function redactSecrets(value: string): {
+  redacted: string;
+  matched: RegExp[];
+} {
+  const matched: RegExp[] = [];
+  let redacted = value;
+  for (const pattern of REDACT_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (pattern.test(redacted)) {
+      matched.push(pattern);
+      pattern.lastIndex = 0;
+      redacted = redacted.replace(pattern, "[REDACTED]");
+    }
+  }
+  return { redacted, matched };
+}
+
 // ─── core builder ───────────────────────────────────────────────────────────
 
 /**
  * Build a redacted debug bundle from explicit, allow-listed inputs.
  *
- * Throws if any value in the serialised bundle matches a secret pattern —
- * this is the hard guarantee: a bundle that would expose secret key material
- * is never returned to the caller.
+ * Trusted (allow-list-controlled) fields are scanned and THROW on a match —
+ * a hit there means the build-time allow-list failed and the caller must
+ * know. Runtime-sourced fields (notably `lastError`) are redacted in place
+ * and reported via `redactionWarnings`, so the user can still file a report.
  */
 export function buildDebugBundle(input: BundleInput): DebugBundle {
+  const warnings: string[] = [];
+
+  // Runtime-sourced field: redact rather than throw so the report survives.
+  let lastError = input.lastError;
+  if (lastError !== null) {
+    const { redacted, matched } = redactSecrets(lastError);
+    if (matched.length > 0) {
+      lastError = redacted;
+      for (const m of matched) {
+        warnings.push(
+          `[debugBundle] Redacted secret-like value in lastError (matched /${m.source}/).`,
+        );
+      }
+    }
+  }
+
   const bundle: DebugBundle = {
     collectedAt: new Date().toISOString(),
     appVersion: input.appVersion,
@@ -124,7 +201,7 @@ export function buildDebugBundle(input: BundleInput): DebugBundle {
     circleId: input.circleId !== null ? input.circleId.toString() : null,
     round: input.round,
     currentStep: input.currentStep,
-    lastError: input.lastError,
+    lastError,
     fundedCount: input.fundedCount,
     circleSize: input.circleSize,
     potStroops: input.pot.toString(),
@@ -133,9 +210,11 @@ export function buildDebugBundle(input: BundleInput): DebugBundle {
     userAgent: input.userAgent,
   };
 
+  if (warnings.length > 0) bundle.redactionWarnings = warnings;
+
   // Defence-in-depth: scan the entire serialised bundle before returning it.
-  // If anything pattern-matches a secret we throw rather than silently redact,
-  // so the caller knows the build-time allow-list failed and can file a bug.
+  // A hit here means a trusted (allow-list-controlled) field leaked — the
+  // build-time guarantee failed, so we throw rather than silently redact.
   const serialised = JSON.stringify(bundle);
   const leaked = findLeakedSecret(serialised);
   if (leaked) {
@@ -168,6 +247,17 @@ export function formatBundleAsMarkdown(bundle: DebugBundle): string {
           .map(([k, h]) => `  ${k}: ${h}`)
           .join("\n")
       : "  (not loaded)";
+
+  const warningLines =
+    bundle.redactionWarnings && bundle.redactionWarnings.length > 0
+      ? [
+          "",
+          "#### Redaction warnings",
+          "```",
+          ...bundle.redactionWarnings,
+          "```",
+        ]
+      : [];
 
   return [
     "### Sharibo debug bundle",
@@ -207,6 +297,7 @@ export function formatBundleAsMarkdown(bundle: DebugBundle): string {
     "```",
     timingLines,
     "```",
+    ...warningLines,
   ].join("\n");
 }
 
@@ -238,7 +329,8 @@ export async function copyDebugBundle(
     await navigator.clipboard.writeText(markdown);
     return { ok: true, markdown };
   } catch {
-    // Return the markdown so the UI can fall back to prompt().
+    // Clipboard API unavailable or permission denied — return the markdown
+    // so the caller can fall back to a manual copy prompt.
     return { ok: false, markdown, error: "Clipboard API unavailable" };
   }
 }
