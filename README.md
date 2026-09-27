@@ -350,3 +350,8 @@ We welcome contributions to Sharibo! See [CONTRIBUTING.md](CONTRIBUTING.md) for 
 - Independent audit of the BLS12-381 Poseidon parameters (or a switch to self-generated / better-provenanced constants).
 - Real stablecoin (issued test asset or mainnet equivalent) instead of native testnet XLM.
 - **Selective disclosure ("view key")** — an admin/auditor could prove a circle's _total_ historical contributions (a sum over funding events already visible on-chain) without exposing which individual funded which round. Not built; the shape is in [breakdown §19](full_product_breakdown.md#19-roadmap).
+
+## Handsoff notes
+
+<!-- handsoff-issue-478 -->
+- #478: `contracts/sharibo/src/lib.rs` is still one 1,215-line module — the split from #234 never happened
