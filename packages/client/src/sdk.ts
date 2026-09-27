@@ -5,6 +5,9 @@ import {
   createCircle,
   fund,
   claim,
+  expireRound,
+  proposeAdmin,
+  acceptAdmin,
   getCircle,
   getCircleCount,
   hasClaimed,
@@ -46,6 +49,19 @@ export interface ClaimArgs {
   nullifierHash: bigint;
   externalNullifier: bigint;
   proof: ContractProof;
+}
+
+export interface ExpireRoundArgs {
+  circleId: bigint;
+}
+
+export interface ProposeAdminArgs {
+  circleId: bigint;
+  newAdmin: string;
+}
+
+export interface AcceptAdminArgs {
+  circleId: bigint;
 }
 
 /**
@@ -124,6 +140,24 @@ export class ShariboSDK {
   /** Claims the pot for `args.recipient`. Mirrors the `claim` free function. */
   claim(args: ClaimArgs): Promise<TxResult<void>> {
     return claim(this.client, args, this.retryPolicy);
+  }
+
+  /**
+   * Expires a stalled round so contributors can recover their funds without
+   * the admin key. Mirrors the `expireRound` free function.
+   */
+  expireRound(args: ExpireRoundArgs): Promise<TxResult<void>> {
+    return expireRound(this.client, args, this.retryPolicy);
+  }
+
+  /** Proposes a new admin for key rotation. Mirrors the `proposeAdmin` free function. */
+  proposeAdmin(args: ProposeAdminArgs): Promise<TxResult<void>> {
+    return proposeAdmin(this.client, args, this.retryPolicy);
+  }
+
+  /** Accepts a pending admin proposal. Mirrors the `acceptAdmin` free function. */
+  acceptAdmin(args: AcceptAdminArgs): Promise<TxResult<void>> {
+    return acceptAdmin(this.client, args, this.retryPolicy);
   }
 
   /** Reads a circle's current state. Mirrors the `getCircle` free function. */

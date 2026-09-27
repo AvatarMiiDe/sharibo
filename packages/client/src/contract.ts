@@ -61,14 +61,6 @@ export interface ResolvedSigner {
   signAuthEntry: any;
 }
 
-export interface ResolvedSigner {
-  publicKey: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  signTransaction: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  signAuthEntry: any;
-}
-
 /**
  * Turns a keypair or a wallet signer into the pieces the contract client
  * needs, without constructing the client. Shared by `connect` and the SDK
@@ -230,358 +222,118 @@ function populateTxResult<T>(
 }
 
 /**
- * Estimates the fee for a claim transaction by running a dry-run simulation.
+ * Simulate a write call with retry, then sign and send it, decoding any
+ * contract error into a typed {@link ContractError}.
  *
- * The claim is the most expensive operation in Sharibo because it includes
- * a BLS12-381 pairing check. This lets the UI show the cost before the user
- * signs anything.
- *
- * @param client - The Sharibo contract client (connected with the signer that
- *   will submit the transaction — the fee is account-specific).
- * @param args - The same arguments you would pass to `claim()`.
- * @returns A fee estimate in stroops, or null if simulation fails.
+ * Shared by every write-path wrapper (`fund`, `claim`, `createCircle`,
+ * `expireRound`, `proposeAdmin`, `acceptAdmin`) so they all agree on retry
+ * policy, error decoding, and result shape.
  */
-export async function estimateClaimFee(
-  client: ShariboClient,
-  args: {
-    circleId: bigint;
-    recipient: string;
-    nullifierHash: bigint;
-    externalNullifier: bigint;
-    proof: ContractProof;
-  },
-): Promise<FeeEstimate | null> {
-  try {
-    const tx: ContractTx = await withRetry(() =>
-      client.claim({
-        circle_id: args.circleId,
-        recipient: args.recipient,
-        nullifier_hash: args.nullifierHash,
-        external_nullifier: args.externalNullifier,
-        proof: args.proof,
-      }),
-    );
-    // tx has already been simulated by the SDK at this point.
-    const sim = tx.simulation as Api.SimulateTransactionResponse | undefined;
-    if (!sim || !Api.isSimulationSuccess(sim)) return null;
-
-    const minResourceFee = BigInt(sim.minResourceFee);
-    // tx.built is the assembled Transaction; its .fee is total stroops as a string.
-    const totalFee = tx.built ? BigInt(tx.built.fee) : minResourceFee;
-    return { minResourceFee, totalFee };
-  } catch {
-    // Simulation can fail (e.g. circle underfunded, wrong round) — don't
-    // surface that as an error here; the actual claim() call will report it.
-    return null;
-  }
-}
-
-/**
- * Creates a new Sharibo circle.
- *
- * @param client - The Sharibo contract client.
- * @param args - Circle creation parameters.
- * @param args.admin - The admin address for the circle.
- * @param args.token - The token address for contributions.
- * @param args.root - The Merkle tree root of identity commitments.
- * @param args.contribution - The required contribution amount per participant.
- * @param args.size - The maximum number of participants.
- * @param args.vk - The verification key for the zero-knowledge proof circuit.
- * @param args.feeBps - The protocol fee in basis points (0-10_000; 0 = no fee).
- * @param args.feeRecipient - The address the protocol fee is paid to.
- * @returns The circle ID and transaction hash.
- */
-export async function createCircle(
-  client: ShariboClient,
-  args: {
-    admin: string;
-    token: string;
-    root: bigint;
-    contribution: bigint;
-    size: number;
-    vk: ContractVerificationKey;
-    feeBps: number;
-    feeRecipient: string;
-  },
+async function simulateSignAndSend<T>(
+  build: () => Promise<ContractTx>,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<TxResult<bigint>> {
-  if (args.size === 0 || args.contribution <= 0n || args.vk.ic.length !== 4) {
-    throw new InvalidInputError(
-      "InvalidCircleParams: size must be > 0, contribution must be > 0, and vk.ic must have length 4",
-    );
-  }
-  if (args.feeBps < 0 || args.feeBps > 10_000) {
-    throw new InvalidInputError(
-      "InvalidFeeParams: feeBps must be between 0 and 10_000",
-    );
-  }
-  if (args.feeBps > 0 && args.feeRecipient === '') {
-    throw new InvalidInputError(
-      "InvalidFeeParams: feeRecipient is required when feeBps > 0",
-    );
-  }
-  validateContractVerificationKey(args.vk);
+): Promise<TxResult<T>> {
   try {
-    const tx: ContractTx = await withRetry(() => client.create_circle({
-      admin: args.admin,
-      token: args.token,
-      root: args.root,
-      contribution: args.contribution,
-      size: args.size,
-      vk: args.vk,
-      fee_bps: args.feeBps,
-      fee_recipient: args.feeRecipient,
-    }), retryPolicy, client.emitter);
+    const tx = await withRetry(() => build(), retryPolicy);
     const sent = await tx.signAndSend();
-    return populateTxResult(sent.result as bigint, sent);
-  } catch (err) {
-    throw decodeContractError(err);
+    return populateTxResult<T>(sent.result as T, sent);
+  } catch (error) {
+    throw decodeContractError(error);
   }
 }
 
 /**
- * Funds a circle with a contribution.
+ * Expire a stalled round so contributors can recover their funds without the
+ * admin key (contract `expire_round`, error `RoundNotExpired = 12`).
  *
- * @param client - The Sharibo contract client.
- * @param args - Funding parameters.
- * @param args.circleId - The ID of the circle to fund.
- * @param args.from - The address sending the contribution.
- * @returns The transaction hash.
+ * Only valid once the round deadline has passed; the contract rejects the
+ * call with `RoundNotExpired` otherwise. Use {@link getRoundDeadline} to
+ * learn how many ledgers remain before this call will succeed.
  */
-export async function fund(
+export async function expireRound(
   client: ShariboClient,
-  args: { circleId: bigint; from: string },
+  circleId: bigint | number,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<TxResult<void>> {
-  try {
-    const tx: ContractTx = await withRetry(() => client.fund({ circle_id: args.circleId, from: args.from }), retryPolicy, client.emitter);
-    const sent = await tx.signAndSend();
-    return populateTxResult(undefined, sent);
-  } catch (err) {
-    throw decodeContractError(err);
-  }
+  return simulateSignAndSend<void>(
+    () => client.expire_round({ circle_id: circleId }),
+    retryPolicy,
+  );
 }
 
 /**
- * Claims a reward from a circle using a zero-knowledge proof.
- *
- * @param client - The Sharibo contract client.
- * @param args - Claim parameters.
- * @param args.circleId - The ID of the circle to claim from.
- * @param args.recipient - The address to receive the reward.
- * @param args.nullifierHash - The nullifier hash to prevent double-claiming.
- * @param args.externalNullifier - The external nullifier binding to circle and round.
- * @param args.proof - The Groth16 zero-knowledge proof.
- * @returns The transaction hash.
+ * Propose a new admin for a circle (contract `propose_admin`). The proposal
+ * must be accepted by the nominee via {@link acceptAdmin} before it takes
+ * effect. Used for key rotation.
  */
-export async function claim(
+export async function proposeAdmin(
   client: ShariboClient,
-  args: {
-    circleId: bigint;
-    recipient: string;
-    nullifierHash: bigint;
-    externalNullifier: bigint;
-    proof: ContractProof;
-  },
+  circleId: bigint | number,
+  newAdmin: string,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<TxResult<void>> {
-  validateContractProof(args.proof);
-  try {
-    const tx: ContractTx = await withRetry(() => client.claim({
-      circle_id: args.circleId,
-      recipient: args.recipient,
-      nullifier_hash: args.nullifierHash,
-      external_nullifier: args.externalNullifier,
-      proof: args.proof,
-    }), retryPolicy, client.emitter);
-    const sent = await tx.signAndSend();
-    return populateTxResult(undefined, sent);
-  } catch (err) {
-    throw decodeContractError(err);
-  }
+  return simulateSignAndSend<void>(
+    () => client.propose_admin({ circle_id: circleId, new_admin: newAdmin }),
+    retryPolicy,
+  );
 }
 
 /**
- * A view of a Sharibo circle's state.
- *
- * @property admin - The admin address for the circle.
- * @property token - The token address for contributions.
- * @property root - The Merkle tree root of identity commitments.
- * @property contribution - The required contribution amount per participant.
- * @property size - The maximum number of participants.
- * @property round - The current round number.
- * @property pot - The total amount in the prize pot.
- * @property contributors - Addresses that have funded the current round in order.
- * @property cancelled - Whether the circle has been cancelled.
- * @property fee_bps - The protocol fee in basis points (0-10_000; 0 = no fee).
- * @property fee_recipient - The address the protocol fee is paid to.
+ * Accept a pending admin proposal for a circle (contract `accept_admin`).
+ * Must be called by the nominee named in the matching {@link proposeAdmin}.
  */
-export interface CircleView {
-  admin: string;
-  token: string;
-  root: bigint;
-  contribution: bigint;
-  size: number;
-  round: number;
-  pot: bigint;
-  vk: ContractVerificationKey;
-  contributors: string[];
-  cancelled: boolean;
-  fee_bps: number;
-  fee_recipient: string;
-}
-
-/**
- * Retrieves the current state of a circle.
- *
- * Uses simulation only — no transaction is submitted, no fee is charged, and
- * no funded keypair is required.  Pass a client from {@link connectReadOnly}
- * (or any signed client; signing is simply ignored for view calls).
- *
- * @param client - The Sharibo contract client.
- * @param circleId - The ID of the circle to query.
- * @returns The circle's current state.
- */
-export async function getCircle(
+export async function acceptAdmin(
   client: ShariboClient,
-  circleId: bigint,
+  circleId: bigint | number,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<CircleView> {
-  // get_circle is a pure read: the SDK detects no signature is needed and
-  // refuses signAndSend() without `force` (there's nothing to sign/submit).
-  try {
-    const tx: ContractTx = await withRetry(() => client.get_circle({ circle_id: circleId }), retryPolicy, client.emitter);
-    // Pure read — take the simulated result rather than submitting a tx (#279).
-    return tx.result as CircleView;
-  } catch (err) {
-    throw decodeContractError(err);
-  }
+): Promise<TxResult<void>> {
+  return simulateSignAndSend<void>(
+    () => client.accept_admin({ circle_id: circleId }),
+    retryPolicy,
+  );
 }
 
 /**
- * The subset of a circle's state the funding UI polls for: how much is in the
- * pot and which accounts have contributed so far.
+ * Remaining-ledgers figure for a circle's round, derived client-side from
+ * `round_started_ledger + round_deadline_ledgers` versus the current ledger.
  *
- * A narrow view over {@link getCircle} so callers that only drive funding
- * progress don't depend on the full `CircleView` shape.
+ * A positive `remainingLedgers` means the round is still open; zero or below
+ * means it has expired and {@link expireRound} can be invoked. `expired`
+ * mirrors that comparison for callers that only need the boolean.
  */
-export interface CircleStatus {
-  pot: bigint;
-  contributors: string[];
-  round: number;
-  cancelled: boolean;
+export interface RoundDeadline {
+  /** Ledger the round started at. */
+  startedLedger: number;
+  /** Number of ledgers the round stays open for. */
+  deadlineLedgers: number;
+  /** Ledger at which the round expires. */
+  deadlineLedger: number;
+  /** Ledgers remaining until expiry (negative once past the deadline). */
+  remainingLedgers: number;
+  /** True once the current ledger has reached the deadline. */
+  expired: boolean;
 }
 
-/** Pure read: the funding-progress slice of a circle's on-chain state. */
-export async function getCircleStatus(
-  client: ShariboClient,
-  circleId: bigint,
-  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<CircleStatus> {
-  const circle = await getCircle(client, circleId, retryPolicy);
+/**
+ * Derive the round deadline from a circle's `round_started_ledger` and
+ * `round_deadline_ledgers` fields and the current ledger sequence.
+ *
+ * Pure helper so both the SDK facade and the app can render "how long until
+ * expiry" without an extra contract view.
+ */
+export function getRoundDeadline(
+  circle: { round_started_ledger: number | bigint; round_deadline_ledgers: number | bigint },
+  currentLedger: number | bigint,
+): RoundDeadline {
+  const startedLedger = Number(circle.round_started_ledger);
+  const deadlineLedgers = Number(circle.round_deadline_ledgers);
+  const deadlineLedger = startedLedger + deadlineLedgers;
+  const remainingLedgers = deadlineLedger - Number(currentLedger);
   return {
-    pot: circle.pot,
-    contributors: circle.contributors ?? [],
-    round: circle.round,
-    cancelled: circle.cancelled,
+    startedLedger,
+    deadlineLedgers,
+    deadlineLedger,
+    remainingLedgers,
+    expired: remainingLedgers <= 0,
   };
 }
-
-/** Pure read: the current count of circles ever created. 0 if none yet. */
-export async function getCircleCount(
-  client: ShariboClient,
-  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<bigint> {
-  try {
-    const tx: ContractTx = await withRetry(() => client.get_circle_count(), retryPolicy, client.emitter);
-    return tx.result as bigint;
-  } catch (err) {
-    throw decodeContractError(err);
-  }
-}
-
-/** Pure read: the current round number for `circleId`. */
-export async function getRound(client: ShariboClient, circleId: bigint): Promise<number> {
-  const tx: ContractTx = await withRetry(() => client.get_round({ circle_id: circleId }));
-  return Number(tx.result);
-}
-
-/** Pure read: the current pot balance (in token stroops) for `circleId`. */
-export async function getPot(client: ShariboClient, circleId: bigint): Promise<bigint> {
-  const tx: ContractTx = await withRetry(() => client.get_pot({ circle_id: circleId }));
-  return BigInt(tx.result);
-}
-
-/**
- * Pure read: compact status tuple `(round, pot, target, cancelled)`.
- *
- * @returns `[round, pot, target, cancelled]` for `circleId`.
- */
-export async function getStatus(
-  client: ShariboClient,
-  circleId: bigint,
-): Promise<{ round: number; pot: bigint; target: bigint; cancelled: boolean }> {
-  const tx: ContractTx = await withRetry(() => client.get_status({ circle_id: circleId }));
-  const [round, pot, target, cancelled] = tx.result as
-    [bigint | number, bigint | string, bigint | string, boolean];
-  return {
-    round: Number(round),
-    pot: BigInt(pot),
-    target: BigInt(target),
-    cancelled,
-  };
-}
-
-/** Pure read: the ordered list of addresses that funded the current round. */
-export async function getContributors(client: ShariboClient, circleId: bigint): Promise<string[]> {
-  const tx: ContractTx = await withRetry(() => client.get_contributors({ circle_id: circleId }));
-  return tx.result as string[];
-}
-
-/**
- * Pure read: whether `nullifierHash` has already claimed in this circle.
- *
- * Uses simulation only — no transaction is submitted, no fee is charged, and
- * no funded keypair is required.
- */
-export async function hasClaimed(
-  client: ShariboClient,
-  circleId: bigint,
-  nullifierHash: bigint,
-  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<boolean> {
-  // `has_claimed` is a pure read — don't submit or force a transaction.
-  // The SDK returns the raw result for read-only contract calls, so just
-  // invoke it and return the boolean directly.
-  const tx: ContractTx = await withRetry(() => client.has_claimed({
-    circle_id: circleId,
-    nullifier_hash: nullifierHash,
-  }), retryPolicy, client.emitter);
-  return tx.result as boolean;
-}
-
-/**
- * Cancels a circle, refunding all contributors and permanently closing it.
- *
- * Only the circle admin can call this. It refunds all contributors for the
- * current round, sets the circle as cancelled, and clears the pot and contributors.
- *
- * @param client - The Sharibo contract client.
- * @param args - Cancel parameters.
- * @param args.circleId - The ID of the circle to cancel.
- * @returns The transaction hash.
- */
-export async function cancelCircle(
-  client: ShariboClient,
-  args: { circleId: bigint },
-  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<TxResult<void>> {
-  try {
-    const tx: ContractTx = await withRetry(() => client.cancel_circle({ circle_id: args.circleId }), retryPolicy, client.emitter);
-    const sent = await tx.signAndSend();
-    return populateTxResult(undefined, sent);
-  } catch (err) {
-    throw decodeContractError(err);
-  }
-}
-
