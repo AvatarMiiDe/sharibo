@@ -1,153 +1,105 @@
-import { Keypair } from "@stellar/stellar-sdk";
 import {
   connect,
-  resolveSigner,
   createCircle,
   fund,
   claim,
   getCircle,
   getCircleCount,
   hasClaimed,
+  getStatus,
+  cancelCircle,
+  getCircleStatus,
+  getRound,
+  getPot,
+  getContributors,
+  estimateClaimFee,
   type ShariboNetworkConfig,
   type ShariboSigner,
-  type ShariboClient,
   type TxResult,
-  type CircleView,
 } from "./contract.js";
-import type { ContractProof, ContractVerificationKey } from "./prove.js";
+import { Keypair } from "@stellar/stellar-sdk";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
 
-export interface ShariboSDKOptions {
-  /** Overrides the default retry policy for every contract call made through this instance. */
-  retryPolicy?: RetryPolicy;
-}
-
-export interface CreateCircleArgs {
-  admin: string;
-  token: string;
-  root: bigint;
-  contribution: bigint;
-  size: number;
-  vk: ContractVerificationKey;
-  /** Protocol fee in basis points (0-10_000; 0 = no fee). */
-  feeBps: number;
-  /** Address the protocol fee is paid to (required when feeBps > 0). */
-  feeRecipient: string;
-}
-
-export interface FundArgs {
-  circleId: bigint;
-  from: string;
-}
-
-export interface ClaimArgs {
-  circleId: bigint;
-  recipient: string;
-  nullifierHash: bigint;
-  externalNullifier: bigint;
-  proof: ContractProof;
-}
-
 /**
- * A ShariboSDK facade for interacting with the Sharibo contract.
+ * Object-oriented facade over the free functions in `contract.ts`.
  *
- * Holds the contract client, the network config, and the retry policy once at
- * creation, so callers stop threading an untyped `client` through every call:
- *
- *   const sdk = await ShariboSDK.connect(config, signer);
- *   const { result: circleId } = await sdk.createCircle({ ... });
- *   await sdk.fund({ circleId, from });
- *   await sdk.claim({ circleId, ... });
- *
- * `connect` is async because it resolves the signer and constructs the
- * underlying @stellar/stellar-sdk contract client.
+ * Each method is a thin delegation that threads the connected `client` and
+ * the configured `retryPolicy` through to the corresponding free function,
+ * so callers don't have to pass them by hand. The free functions remain the
+ * low-level layer (see `docs/adr/003-client-boundary.md`); this facade is the
+ * recommended entry point for application code.
  */
 export class ShariboSDK {
-  /** The network configuration this instance was created with. */
-  readonly networkConfig: ShariboNetworkConfig;
-  /** The raw contract client. Exposed for escape hatches the facade doesn't cover yet. */
-  readonly client: ShariboClient;
-  /** The retry policy applied to every contract call through this instance. */
-  readonly retryPolicy: RetryPolicy;
-  /** Public key of the signer this instance transacts as. */
-  readonly publicKey: string;
-  /** The keypair or wallet signer this instance signs with. */
-  readonly signer: Keypair | ShariboSigner;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly client: any;
+  private readonly retryPolicy: RetryPolicy;
 
-  private constructor(
-    networkConfig: ShariboNetworkConfig,
-    client: ShariboClient,
-    retryPolicy: RetryPolicy,
-    publicKey: string,
-    signer: Keypair | ShariboSigner,
-  ) {
-    this.networkConfig = networkConfig;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private constructor(client: any, retryPolicy: RetryPolicy) {
     this.client = client;
     this.retryPolicy = retryPolicy;
-    this.publicKey = publicKey;
-    this.signer = signer;
   }
 
-  /**
-   * Creates an SDK instance bound to one signer and one network.
-   *
-   * @param config - Network configuration (contract id, RPC url, passphrase).
-   * @param keypairOrSigner - Keypair, or a wallet-style signer.
-   * @param options - Optional overrides (e.g. a custom retry policy).
-   */
   static async connect(
     config: ShariboNetworkConfig,
     keypairOrSigner: Keypair | ShariboSigner,
-    options: ShariboSDKOptions = {},
+    retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
   ): Promise<ShariboSDK> {
     const client = await connect(config, keypairOrSigner);
-    const { publicKey } = resolveSigner(keypairOrSigner, config.networkPassphrase);
-    return new ShariboSDK(
-      config,
-      client,
-      options.retryPolicy ?? DEFAULT_RETRY_POLICY,
-      publicKey,
-      keypairOrSigner,
-    );
+    return new ShariboSDK(client, retryPolicy);
   }
 
-  /** Creates a new circle. Mirrors the `createCircle` free function. */
-  createCircle(args: CreateCircleArgs): Promise<TxResult<bigint>> {
-    return createCircle(this.client, args, this.retryPolicy);
+  createCircle(...args: Parameters<typeof createCircle> extends [unknown, ...infer R] ? R : never) {
+    return createCircle(this.client, this.retryPolicy, ...args);
   }
 
-  /** Funds a circle from `args.from`. Mirrors the `fund` free function. */
-  fund(args: FundArgs): Promise<TxResult<void>> {
-    return fund(this.client, args, this.retryPolicy);
+  fund(...args: Parameters<typeof fund> extends [unknown, ...infer R] ? R : never) {
+    return fund(this.client, this.retryPolicy, ...args);
   }
 
-  /** Claims the pot for `args.recipient`. Mirrors the `claim` free function. */
-  claim(args: ClaimArgs): Promise<TxResult<void>> {
-    return claim(this.client, args, this.retryPolicy);
+  claim(...args: Parameters<typeof claim> extends [unknown, ...infer R] ? R : never) {
+    return claim(this.client, this.retryPolicy, ...args);
   }
 
-  /** Reads a circle's current state. Mirrors the `getCircle` free function. */
-  getCircle(circleId: bigint): Promise<CircleView> {
-    return getCircle(this.client, circleId, this.retryPolicy);
+  getCircle(...args: Parameters<typeof getCircle> extends [unknown, ...infer R] ? R : never) {
+    return getCircle(this.client, this.retryPolicy, ...args);
   }
 
-  /** Pure read: how many circles have been created on this contract. */
-  getCircleCount(): Promise<bigint> {
-    return getCircleCount(this.client, this.retryPolicy);
+  getCircleCount(...args: Parameters<typeof getCircleCount> extends [unknown, ...infer R] ? R : never) {
+    return getCircleCount(this.client, this.retryPolicy, ...args);
   }
 
-  /**
-   * Contract-level status: the number of circles ever created on the deployed
-   * contract. Listed in issue #284's sketch of the facade API; implemented
-   * over the contract's existing read (there is no `get_status` contract
-   * method), so this is an alias for `getCircleCount`.
-   */
-  getStatus(): Promise<bigint> {
-    return this.getCircleCount();
+  hasClaimed(...args: Parameters<typeof hasClaimed> extends [unknown, ...infer R] ? R : never) {
+    return hasClaimed(this.client, this.retryPolicy, ...args);
   }
 
-  /** Pure read: whether `nullifierHash` already claimed in this circle. */
-  hasClaimed(circleId: bigint, nullifierHash: bigint): Promise<boolean> {
-    return hasClaimed(this.client, circleId, nullifierHash, this.retryPolicy);
+  getStatus(...args: Parameters<typeof getStatus> extends [unknown, ...infer R] ? R : never) {
+    return getStatus(this.client, this.retryPolicy, ...args);
+  }
+
+  cancelCircle(...args: Parameters<typeof cancelCircle> extends [unknown, ...infer R] ? R : never) {
+    return cancelCircle(this.client, this.retryPolicy, ...args);
+  }
+
+  getCircleStatus(...args: Parameters<typeof getCircleStatus> extends [unknown, ...infer R] ? R : never) {
+    return getCircleStatus(this.client, this.retryPolicy, ...args);
+  }
+
+  getRound(...args: Parameters<typeof getRound> extends [unknown, ...infer R] ? R : never) {
+    return getRound(this.client, this.retryPolicy, ...args);
+  }
+
+  getPot(...args: Parameters<typeof getPot> extends [unknown, ...infer R] ? R : never) {
+    return getPot(this.client, this.retryPolicy, ...args);
+  }
+
+  getContributors(...args: Parameters<typeof getContributors> extends [unknown, ...infer R] ? R : never) {
+    return getContributors(this.client, this.retryPolicy, ...args);
+  }
+
+  estimateClaimFee(...args: Parameters<typeof estimateClaimFee> extends [unknown, ...infer R] ? R : never) {
+    return estimateClaimFee(this.client, this.retryPolicy, ...args);
   }
 }
+
+export type { TxResult };
