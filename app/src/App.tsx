@@ -65,21 +65,7 @@ import { ConnectionStatus } from "./components/ConnectionStatus";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { diagnose, type Failure } from "./state/circleMachine";
 import { copyDebugBundle, type BundleInput } from "./lib/debugBundle";
-
-const BIGINT_MARKER = 'BIGINT::';
-function replacer(key: string, value: unknown): unknown {
-  if (typeof value === 'bigint') {
-    return BIGINT_MARKER + value.toString();
-  }
-  return value;
-}
-
-function reviver(key: string, value: unknown): unknown {
-  if (typeof value === 'string' && value.startsWith(BIGINT_MARKER)) {
-    return BigInt(value.slice(BIGINT_MARKER.length));
-  }
-  return value;
-}
+import { parse } from "./lib/bigintJson";
 
 // `config` is null when config validation failed (see config.ts); the component
 // below gates on `configError.length > 0` and renders the setup screen, so these
@@ -696,7 +682,7 @@ export default function App() {
     const saved = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("sharibo_demo_state") : null;
     if (saved) {
       try {
-        const parsed = JSON.parse(saved, reviver);
+        const parsed: any = parse(saved);
         if (parsed && parsed.circleId) {
           setResumePrompt(parsed);
         }
