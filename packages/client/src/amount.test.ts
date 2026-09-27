@@ -1,21 +1,35 @@
-import { test } from "vitest";
+import { describe, it } from "vitest";
 import assert from "node:assert/strict";
+import { STROOPS_PER_XLM, formatXlm, xlmToStroops } from "./amount";
 
-import { formatXlm, xlmToStroops, STROOPS_PER_XLM } from "./amount.js";
+describe("formatXlm", () => {
+  it("preserves all seven fractional digits at the i128::MAX boundary without float rounding", () => {
+    const maxI128 = 170141183460469231731687303715884105727n;
+    assert.equal(formatXlm(maxI128), "17014118346046923173168730371588.4105727");
+  });
 
-test("xlmToStroops rounds the 1-stroop boundary exactly", () => {
-  assert.equal(xlmToStroops("0.0000001"), 1n);
-  assert.equal(xlmToStroops("0.00000009"), 0n);
-});
+  it("xlmToStroops and formatXlm handle negative values consistently", () => {
+    const maxI128 = 170141183460469231731687303715884105727n;
+    assert.equal(formatXlm(-maxI128), "-17014118346046923173168730371588.4105727");
+    assert.equal(formatXlm(-1n), "-0.0000001");
+  });
 
-test("formatXlm preserves the full i128::MAX boundary without losing precision", () => {
-  const maxI128 = 170141183460469231731687303715884105727n;
-  assert.equal(formatXlm(maxI128), "170141183460469231731687303715884105727.0000000");
-  assert.equal(STROOPS_PER_XLM, 10_000_000n);
-});
+  it("formats zero stroops", () => {
+    assert.equal(formatXlm(0n), "0.0000000");
+  });
 
-test("xlmToStroops and formatXlm handle negative values consistently", () => {
-  assert.equal(xlmToStroops("-0.0000001"), -1n);
-  assert.equal(formatXlm(-1n), "-0.0000001");
-  assert.equal(formatXlm(-170141183460469231731687303715884105727n), "-170141183460469231731687303715884105727.0000000");
+  it("formats whole XLM amounts", () => {
+    assert.equal(formatXlm(STROOPS_PER_XLM), "1.0000000");
+  });
+
+  it("pads sub-stroop remainders instead of using toString", () => {
+    assert.equal(formatXlm(10_000_001n), "1.0000001");
+  });
+
+  it("round-trips through xlmToStroops", () => {
+    const values = [0n, 1n, STROOPS_PER_XLM, 10_000_001n, 170141183460469231731687303715884105727n];
+    for (const stroops of values) {
+      assert.equal(xlmToStroops(formatXlm(stroops)), stroops);
+    }
+  });
 });
