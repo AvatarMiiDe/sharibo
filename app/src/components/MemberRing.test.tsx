@@ -35,3 +35,22 @@ describe("MemberRing", () => {
     expect(screen.queryByLabelText(/Ada.*already claimed/i)).toBeNull();
   });
 });
+
+describe("component stylesheets", () => {
+  it("imports every sibling *.module.css from a .tsx component", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const dir = path.dirname(new URL(import.meta.url).pathname);
+    const entries = await fs.readdir(dir);
+    const modules = entries.filter((f) => f.endsWith(".module.css"));
+    const sources = await Promise.all(
+      entries
+        .filter((f) => f.endsWith(".tsx"))
+        .map((f) => fs.readFile(path.join(dir, f), "utf8")),
+    );
+    const orphans = modules.filter(
+      (m) => !sources.some((src) => src.includes(`./${m}`)),
+    );
+    expect(orphans).toEqual([]);
+  });
+});
