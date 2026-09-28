@@ -11,7 +11,7 @@ use soroban_sdk::{
     crypto::bls12_381::{G1_SERIALIZED_SIZE, G2_SERIALIZED_SIZE},
     symbol_short,
     testutils::{Address as _, Ledger as _},
-    BytesN, TryIntoVal, U256,
+    BytesN, Map, TryIntoVal, U256, Val,
 };
 use std::vec::Vec as StdVec;
 
@@ -925,8 +925,12 @@ fn create_circle_emits_created_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
     assert_eq!(topic2, circle_id);
 
-    let (event_admin, event_token, event_contribution, event_size): (Address, Address, i128, u32) =
-        data.try_into_val(&env).unwrap();
+    // Verify field names and order via the typed event struct's Map
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let event_admin: Address = map.get(symbol_short!("admin")).unwrap().try_into_val(&env).unwrap();
+    let event_token: Address = map.get(symbol_short!("token")).unwrap().try_into_val(&env).unwrap();
+    let event_contribution: i128 = map.get(symbol_short!("contrib")).unwrap().try_into_val(&env).unwrap();
+    let event_size: u32 = map.get(symbol_short!("size")).unwrap().try_into_val(&env).unwrap();
     assert_eq!(event_admin, admin);
     assert_eq!(event_token, token);
     assert_eq!(event_contribution, contribution);
@@ -951,7 +955,7 @@ fn create_circle_rejects_size_above_max_capacity() {
     // The Merkle tree holds at most 2^4 = 16 commitments (circuits/config.json);
     // a larger size can never be fully claimed.
     let oversized = MAX_CIRCLE_SIZE + 1;
-    client.create_circle(&admin, &token, &root, &100i128, &oversized, &0u32, &vk);
+    client.create_circle(&admin, &token, &root, &100i128, &oversized, &0u32, &vk, &0u32, &Address::generate(&env));
 }
 
 #[test]
@@ -968,7 +972,7 @@ fn create_circle_accepts_max_capacity_size() {
     let root = real_root(&env);
     let vk = real_verification_key(&env);
 
-    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &MAX_CIRCLE_SIZE, &0u32, &vk);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &MAX_CIRCLE_SIZE, &0u32, &vk, &0u32, &Address::generate(&env));
     let circle = client.get_circle(&circle_id);
     assert_eq!(circle.size, MAX_CIRCLE_SIZE);
 }
@@ -1036,8 +1040,10 @@ fn fund_emits_funded_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (event_from, new_pot, target): (Address, i128, i128) =
-        data.try_into_val(&s.env).unwrap();
+    let map: Map<Symbol, Val> = data.try_into_val(&s.env).unwrap();
+    let event_from: Address = map.get(symbol_short!("from")).unwrap().try_into_val(&s.env).unwrap();
+    let new_pot: i128 = map.get(symbol_short!("pot")).unwrap().try_into_val(&s.env).unwrap();
+    let target: i128 = map.get(symbol_short!("target")).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(event_from, from);
     assert_eq!(new_pot, s.contribution);
     assert_eq!(target, s.contribution * (s.size as i128));
@@ -1081,10 +1087,12 @@ fn claim_emits_claimed_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (round, amount, event_recipient): (u32, i128, Address) =
-        data.try_into_val(&s.env).unwrap();
-    assert_eq!(round, 0);
-    assert_eq!(amount, s.contribution * (s.size as i128));
+    let map: Map<Symbol, Val> = data.try_into_val(&s.env).unwrap();
+    let claimed_round: u32 = map.get(symbol_short!("cround")).unwrap().try_into_val(&s.env).unwrap();
+    let payout: i128 = map.get(symbol_short!("payout")).unwrap().try_into_val(&s.env).unwrap();
+    let event_recipient: Address = map.get(symbol_short!("recipient")).unwrap().try_into_val(&s.env).unwrap();
+    assert_eq!(claimed_round, 0);
+    assert_eq!(payout, s.contribution * (s.size as i128));
     assert_eq!(event_recipient, recipient);
 }
 
@@ -1115,10 +1123,97 @@ fn cancel_circle_emits_cancelled_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (refunded_count, refunded_total): (u32, i128) =
-        data.try_into_val(&s.env).unwrap();
+    let map: Map<Symbol, Val> = data.try_into_val(&s.env).unwrap();
+    let refunded_count: u32 = map.get(symbol_short!("rcount")).unwrap().try_into_val(&s.env).unwrap();
+    let refunded_total: i128 = map.get(symbol_short!("rtotal")).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(refunded_count, 2);
     assert_eq!(refunded_total, s.contribution * 2i128);
+}
+
+#[test]
+fn propose_admin_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&circle_id, &new_admin);
+
+    let events = env.events().all();
+    let event = events.iter().find(|(_, topics, _)| {
+        let t0: Option<Symbol> = topics.get(0).and_then(|v| v.try_into_val(&env).ok());
+        t0 == Some(symbol_short!("prop_adm"))
+    }).unwrap();
+    let (_, _, data) = event;
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let circle_id_val: u64 = map.get(symbol_short!("circle_id")).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(circle_id_val, circle_id);
+}
+
+#[test]
+fn accept_admin_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&circle_id, &new_admin);
+    client.accept_admin(&circle_id);
+
+    let events = env.events().all();
+    let event = events.iter().find(|(_, topics, _)| {
+        let t0: Option<Symbol> = topics.get(0).and_then(|v| v.try_into_val(&env).ok());
+        t0 == Some(symbol_short!("acc_adm"))
+    }).unwrap();
+    let (_, _, data) = event;
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let circle_id_val: u64 = map.get(symbol_short!("circle_id")).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(circle_id_val, circle_id);
+}
+
+#[test]
+fn expire_round_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &5u32, &10u32, &vk, &0u32, &Address::generate(&env));
+    // Advance ledger past deadline
+    env.ledger().with_mut(|l| { l.sequence_number += 20; });
+    client.expire_round(&circle_id);
+
+    let events = env.events().all();
+    let event = events.iter().find(|(_, topics, _)| {
+        let t0: Option<Symbol> = topics.get(0).and_then(|v| v.try_into_val(&env).ok());
+        t0 == Some(symbol_short!("rnd_exp"))
+    }).unwrap();
+    let (_, _, data) = event;
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let circle_id_val: u64 = map.get(symbol_short!("circle_id")).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(circle_id_val, circle_id);
 }
 
 #[test]

@@ -51,6 +51,7 @@ each covers and where to find it.
 |---|---|
 | [`contracts/README.md`](../contracts/README.md) | Contract build and deploy instructions |
 | [`contracts/BENCHMARKS.md`](../contracts/BENCHMARKS.md) | CPU instruction benchmarks and gas analysis for contract entrypoints |
+| [`events.md`](events.md) | Typed event schema: all seven `#[contractevent]` structs, topics, data fields, and lifecycle |
 
 ## Verifiability
 
