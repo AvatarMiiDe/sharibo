@@ -103,8 +103,9 @@ verify:
     echo "\n== 3) Dead-code check (ts-prune; best-effort) =="; \
     npx -y ts-prune --summary || s_deadcode=1; \
 
-    echo "\n== 4) Unit tests (app + packages/client + circuits if present) =="; \
+    echo "\n== 4) Unit tests (app + packages/core + packages/client + circuits if present) =="; \
     npm run -s test --workspace=app || s_tests=1; \
+    npm run -s test --workspace=packages/core || s_tests=1; \
     npm run -s test --workspace=packages/client || s_tests=1; \
     if [ -f circuits/package.json ]; then (cd circuits && npm test --if-present) || true; fi; \
 
@@ -168,6 +169,7 @@ test:
 
     run_suite "dead-code check"   npm run lint:dead
     run_suite "client typecheck"  npm run typecheck --workspace=packages/client
+    run_suite "core tests"        npm test          --workspace=packages/core
     run_suite "client tests"      npm test          --workspace=packages/client
     run_suite "app tests"         npm test          --workspace=app
     run_suite "scripts tests"     npm test          --workspace=scripts

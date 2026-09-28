@@ -82,6 +82,12 @@
       // snarkjs ships without type declarations; the binary is used in shell
       // scripts, not imported as a module.
       "ignoreDependencies": ["snarkjs"]
+    },
+
+    // ── test-vectors workspace ──────────────────────────────────────────────
+    "test-vectors": {
+      "entry": ["generate.mjs"],
+      "project": ["generate.mjs"]
     }
   },
 
