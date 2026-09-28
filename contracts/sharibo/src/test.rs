@@ -517,7 +517,7 @@ fn claim_skips_fee_transfer_when_fee_bps_zero() {
 
 #[test]
 fn fee_is_immutable_after_creation() {
-    // There is deliberately no setter for fee_bps/fee_recipient (ADR 003):
+    // There is deliberately no setter for fee_bps/fee_recipient (ADR 007):
     // once committed at create_circle, every public entrypoint leaves them
     // exactly as they were. Funding and claiming both write the circle on
     // every call; asserting the fee survives fund (and the earlier

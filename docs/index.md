@@ -37,6 +37,10 @@ each covers and where to find it.
 | [`adr/002-multi-round-turn-ordering.md`](adr/002-multi-round-turn-ordering.md) | ADR 002: multi-round turn ordering and cycle-scoped nullifier behavior |
 | [`adr/003-client-boundary.md`](adr/003-client-boundary.md) | ADR 003: app ↔ SDK ↔ contract boundary and the current free-function design |
 | [`adr/004-storage-archival.md`](adr/004-storage-archival.md) | ADR 004: per-key storage TTL/archival analysis, including the nullifier double-claim fence's residual risk |
+| [`adr/005-storage-migration.md`](adr/005-storage-migration.md) | ADR 005: Circle storage schema versioning and migration |
+| [`adr/006-recipient-binding.md`](adr/006-recipient-binding.md) | ADR 006: Recipient binding strategy |
+| [`adr/007-protocol-fees.md`](adr/007-protocol-fees.md) | ADR 007: Protocol fees |
+| [`adr/008-leanimt-dynamic-depth-merkle-tree.md`](adr/008-leanimt-dynamic-depth-merkle-tree.md) | ADR 008: Evaluate LeanIMT (dynamic-depth Merkle tree) to replace the fixed-depth tree |
 
 ## Circuit docs
 

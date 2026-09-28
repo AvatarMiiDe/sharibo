@@ -12,7 +12,8 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "e2e": "npm run e2e --workspace=scripts",
-    "test": "npm test --workspaces --if-present",
+    "test": "npm test --workspaces --if-present && npm run check:adrs",
+    "check:adrs": "node scripts/maintenance/check-adrs.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "lint:dead": "knip",

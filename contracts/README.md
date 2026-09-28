@@ -154,7 +154,7 @@ Below is the documentation for all public contract methods.
       fee_recipient: Address,
   ) -> u64
   ```
-  (See [`docs/adr/003-protocol-fees.md`](../docs/adr/003-protocol-fees.md) for
+  (See [`docs/adr/007-protocol-fees.md`](../docs/adr/007-protocol-fees.md) for
   the fee design.)
 
 * **Purpose**:

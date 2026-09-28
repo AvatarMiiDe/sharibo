@@ -165,7 +165,7 @@ pub struct Circle {
     ///
     /// Committed at circle creation — there is deliberately **no setter**, so
     /// members can read [`Contract::get_circle`] before funding and know
-    /// exactly what will be deducted (see `docs/adr/003-protocol-fees.md`).
+    /// exactly what will be deducted (see `docs/adr/007-protocol-fees.md`).
     /// A `0` fee costs nothing extra on `claim` (the fee transfer is skipped).
     pub fee_bps: u32,
     /// Address that receives the [`Self::fee_bps`] deduction on every
