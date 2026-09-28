@@ -67,9 +67,15 @@ client:
 
 # ── Scripts ───────────────────────────────────────────────────────────────────
 
-# Run the scripts workspace unit tests (node --test)
+# Run the scripts workspace unit tests (node --test).
+# Hermetic: passes with networking disabled.
 scripts-test:
     npm test --workspace=scripts
+
+# Run the scripts workspace LIVE tests (reaches friendbot / Horizon testnet).
+# Opt-in, never part of the default suite.
+scripts-test-live:
+    npm run test:live --workspace=scripts
 
 # ── App ───────────────────────────────────────────────────────────────────────
 

@@ -21,7 +21,8 @@
     "doctor": "tsx doctor.ts",
     "e2e": "tsx e2e.ts",
     "smoke": "tsx smoke.ts",
-    "test": "node --import tsx/esm --test *.test.ts"
+    "test": "node --import tsx/esm --test \"*.test.ts\" \"!*.live.test.ts\"",
+    "test:live": "node --import tsx/esm --test \"*.live.test.ts\""
   },
   "dependencies": {
     "@sharibo/client": "*",

@@ -8,7 +8,7 @@
 // Flags (node:util parseArgs, no new deps):
 //   --skip-replay         Stop after the successful claim (skip round 2 funding + replay check)
 //   --reuse-circle <id>   Skip circle creation; run against an existing circle
-//   --verbose             Echo each RPC/curl interaction
+//   --verbose             Echo each RPC/HTTP interaction
 //
 // Requires: circuits/build/{membership_js/membership.wasm,membership_final.zkey}
 // (run circuits/scripts/{compile,setup}.sh first) and a populated .env.
@@ -25,10 +25,8 @@
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify, parseArgs } from "node:util";
-
-const execFileAsync = promisify(execFile);
+import { parseArgs } from "node:util";
+import { httpGet } from "./http.js";
 import { Keypair } from "@stellar/stellar-sdk";
 import {
   ShariboSDK,
@@ -91,15 +89,14 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-// Node's own fetch()/undici hung indefinitely against these two endpoints in
-// this environment even with AbortSignal.timeout set, while plain `curl`
-// consistently worked in seconds (see NOTES.md) — so these two HTTP calls
-// specifically shell out to curl rather than use fetch.
-async function curlGet(url: string): Promise<string> {
-  verbose("curl GET", url);
-  const { stdout } = await execFileAsync("curl", ["-s", "--max-time", "15", url]);
-  verbose("curl response length:", stdout.length, "bytes");
-  return stdout;
+// HTTP goes through the shared helper in scripts/http.ts (fetch + an explicit
+// abort deadline + keepalive: false), not a `curl` subprocess. `curl` was an
+// undeclared runtime dependency of this script and is gone; see #511.
+async function get(url: string): Promise<string> {
+  verbose("GET", url);
+  const body = await httpGet(url);
+  verbose("response length:", body.length, "bytes");
+  return body;
 }
 
 async function friendbotFund(publicKey: string): Promise<void> {
@@ -107,7 +104,7 @@ async function friendbotFund(publicKey: string): Promise<void> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       verbose(`friendbot attempt ${attempt}/${attempts} for ${publicKey}`);
-      await curlGet(`https://friendbot.stellar.org?addr=${publicKey}`);
+      await get(`https://friendbot.stellar.org?addr=${publicKey}`);
       return;
     } catch (err) {
       if (attempt === attempts) throw err;
@@ -120,7 +117,7 @@ async function friendbotFund(publicKey: string): Promise<void> {
 
 async function nativeBalance(publicKey: string): Promise<bigint> {
   verbose("fetching balance for", publicKey);
-  const body = await curlGet(`https://horizon-testnet.stellar.org/accounts/${publicKey}`);
+  const body = await get(`https://horizon-testnet.stellar.org/accounts/${publicKey}`);
   const account = JSON.parse(body);
   const native = account.balances.find((b: { asset_type: string }) => b.asset_type === "native");
   // Horizon reports balances as decimal XLM strings; convert to stroops.
