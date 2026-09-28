@@ -19,7 +19,7 @@ import {
   TREE_LEVELS,
   getArtifacts,
 } from "@sharibo/client";
-import { config } from "../config.js";
+import { config, CIRCLE_SIZE } from "../config.js";
 import { friendbotFund } from "../lib/friendbot.js";
 import type { Member, ClaimResult } from "../types.js";
 
@@ -35,10 +35,9 @@ const NETWORK = {
 };
 const TOKEN = config.testTokenContractId;
 const LEVELS = TREE_LEVELS;
-const CIRCLE_SIZE = 5;
 
 // All the state and on-chain calls behind a single demo run: create a
-// circle, fund it from 5 members, prove + claim, then optionally replay the
+// circle, fund it from the configured members, prove + claim, then optionally replay the
 // same proof to demonstrate nullifier rejection. Kept as one hook (rather
 // than split further) because every step depends on state written by the
 // previous one — App.tsx only composes the resulting state and callbacks
@@ -109,7 +108,7 @@ export function useCircleFlow() {
   async function startCircle() {
     setError(null);
     setCirclePhase("loading");
-    setBusy("Generating a fresh admin + 5 member identities and funding via friendbot…");
+    setBusy(`Generating a fresh admin + ${CIRCLE_SIZE} member identities and funding via friendbot…`);
     try {
       const adminKp = Keypair.random();
       await friendbotFund(adminKp.publicKey());

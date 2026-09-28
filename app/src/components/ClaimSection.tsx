@@ -4,15 +4,6 @@ import styles from "./ClaimSection.module.css";
 import { useI18n } from "../i18n.js";
 import type { ClaimStage } from "../types.js";
 
-const STROOPS_PER_XLM = 10_000_000n;
-
-/** Format a stroop amount as a human-readable XLM string, e.g. "0.0123456 XLM". */
-function formatXlm(stroops: bigint): string {
-  const whole = stroops / STROOPS_PER_XLM;
-  const frac = stroops % STROOPS_PER_XLM;
-  return `${whole}.${frac.toString().padStart(7, "0")} XLM`;
-}
-
 export function ClaimSection({
   members,
   claimantIndex,

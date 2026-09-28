@@ -18,12 +18,13 @@ export function useRingRadius(): number {
   return radius;
 }
 
-// Purely presentational: after a claim, none of the 5 nodes are highlighted
+// Purely presentational: after a claim, none of the nodes are highlighted
 // as "the one that claimed" — that's the point. From outside the ring, all
-// five remain equally plausible; only the demo operator (via the radio
+// members remain equally plausible; only the demo operator (via the radio
 // picker below) ever knows which one actually did.
 import type { Member } from "../types.js";
 import { useI18n } from "../i18n.js";
+import { CIRCLE_SIZE } from "../config.js";
 
 export function MemberRing({
   members,
@@ -104,9 +105,7 @@ export function MemberRing({
 
       {revealed && (
         <p className="ring-caption">
-          Payout landed on the address above — cryptographically, it could be
-          tied to <em>any</em> of the 5 members in the ring. An outside
-          observer cannot tell which.
+          {t("ring.caption", { count: members.length })}
         </p>
       )}
     </div>
@@ -119,8 +118,8 @@ export function MemberRingSkeleton() {
     <div className="ring-wrap" aria-hidden="true">
       <div className="ring">
         <div className="skeleton skeleton-ring-center" />
-        {Array.from({ length: 5 }, (_, i) => {
-          const angle = (i / 5) * 2 * Math.PI - Math.PI / 2;
+        {Array.from({ length: CIRCLE_SIZE }, (_, i) => {
+          const angle = (i / CIRCLE_SIZE) * 2 * Math.PI - Math.PI / 2;
           const x = Math.round(Math.cos(angle) * radius);
           const y = Math.round(Math.sin(angle) * radius);
           return (

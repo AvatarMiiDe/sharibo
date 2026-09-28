@@ -17,6 +17,7 @@ import {
   verificationKeyToContractFormat,
   connect,
   connectReadOnly,
+  clearContractClientCache,
   createCircle,
   fund,
   claim,
@@ -45,7 +46,7 @@ import {
   describeError,
   networkOf,
 } from "@sharibo/client";
-import { config, configError } from "./config";
+import { config, configError, CIRCLE_SIZE } from "./config";
 import { useI18n } from "./i18n";
 import { usePoliteLiveRegion } from "./usePoliteLiveRegion";
 import { ArtifactProgress } from "./components/ArtifactProgress.js";
@@ -92,7 +93,6 @@ const NETWORK = {
 };
 const TOKEN = config?.testTokenContractId ?? "";
 const LEVELS = TREE_LEVELS;
-const CIRCLE_SIZE = 5;
 const README_URL = "https://github.com/crackedstudio/sharibo#honest-limitations";
 
 const isTestnet = networkOf(NETWORK.networkPassphrase) === "testnet";
@@ -556,8 +556,7 @@ function MemberRing({ members, revealed }: { members: { funded: boolean; pending
       </div>
       {revealed && (
         <p id={captionId} role="note" className={styles.ringCaption}>
-          Payout landed on the address above — cryptographically, it could be tied to <em>any</em>{" "}
-          of the {members.length} members in the ring. An outside observer cannot tell which.
+          {t("ring.caption", { count: members.length })}
         </p>
       )}
     </div>
@@ -657,6 +656,9 @@ export default function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<any[]>([]);
+  const handleSdkEvent = useCallback((event: unknown) => {
+    setEvents((previous) => [...previous, event]);
+  }, []);
 
   const [contributionXlm, setContributionXlm] = useState(10);
   const [admin, setAdmin] = useState<Keypair | null>(null);
@@ -880,6 +882,7 @@ export default function App() {
     // Cancel any in-flight proof generation / artifact download.
     claimAbortRef.current?.abort();
     claimAbortRef.current = null;
+    clearContractClientCache();
 
     setPreviousCircleId(circleId);
     sessionStorage.removeItem("sharibo_demo_state");
@@ -960,7 +963,7 @@ export default function App() {
       ]);
       const { generateIdentity, MerkleTree, verificationKeyToContractFormat, connect, createCircle } = client;
 
-      setBusy(t("busy.generating"));
+      setBusy(t("busy.generating", { count: CIRCLE_SIZE }));
       const adminKp = Keypair.random();
       await fundWithFriendbot(adminKp.publicKey());
 
@@ -981,7 +984,7 @@ export default function App() {
         r.json(),
       );
       const vk = verificationKeyToContractFormat(vkJson);
-      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, adminKp);
+      const adminClient = await connect({ ...NETWORK, onEvent: handleSdkEvent }, adminKp);
       const { result: newCircleId } = await createCircle(adminClient, {
         admin: adminKp.publicKey(),
         token: TOKEN,
@@ -1073,6 +1076,7 @@ export default function App() {
       // Check for network mismatch between wallet and app config
       const mismatch = checkNetworkMatch(networkRes.network, NETWORK.networkPassphrase);
       if (mismatch) {
+        clearContractClientCache();
         throw new Error(
           `Your Freighter wallet is connected to ${mismatch.walletNetwork}, ` +
           `but this app is configured for ${mismatch.appNetwork}. ` +
@@ -1094,6 +1098,7 @@ export default function App() {
           const currentNetworkRes = await getNetworkDetails();
           const currentMismatch = checkNetworkMatch(currentNetworkRes.network, NETWORK.networkPassphrase);
           if (currentMismatch) {
+            clearContractClientCache();
             throw new Error(
               `Your Freighter wallet is connected to ${currentMismatch.walletNetwork}, ` +
               `but this app is configured for ${currentMismatch.appNetwork}. ` +
@@ -1217,7 +1222,7 @@ export default function App() {
 
       if (signal.aborted) return;
       setClaimStage("submitting");
-      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, admin);
+      const adminClient = await connect({ ...NETWORK, onEvent: handleSdkEvent }, admin);
       const { hash } = await claim(adminClient, {
         circleId,
         recipient: recipient.publicKey(),
@@ -1266,9 +1271,9 @@ export default function App() {
       // Fund round `round` again so this exercises the nullifier-reuse
       // check specifically, not just "the pot is empty" — the same
       // proof's nullifier gets rejected even against a fresh, funded round.
-      const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, admin);
+      const adminClient = await connect({ ...NETWORK, onEvent: handleSdkEvent }, admin);
       for (const m of members) {
-        const memberClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, m.keypair);
+        const memberClient = await connect({ ...NETWORK, onEvent: handleSdkEvent }, m.keypair);
         await fund(memberClient, { circleId, from: m.keypair.publicKey() });
       }
       const freshExternalNullifier = await computeExternalNullifier(
@@ -1304,7 +1309,7 @@ export default function App() {
     setError(null);
     
     const refundCount = onChainContributors.length;
-    const refundTotal = (Number(pot) / 1e7).toFixed(1);
+    const refundTotal = formatXlm(pot);
     
     const confirmed = window.confirm(
       t("cancel.confirmation", { count: refundCount, total: refundTotal })
@@ -1480,7 +1485,7 @@ export default function App() {
               />
             </div>
             <p className="pot-label">
-              pot: {(Number(pot) / 1e7).toFixed(1)} / {contributionXlm * CIRCLE_SIZE} XLM ·
+              pot: {formatXlm(pot)} / {contributionXlm * CIRCLE_SIZE} XLM ·
               round {round}
               {feeBps > 0 &&
                 ` · ${t("pot.fee", {
