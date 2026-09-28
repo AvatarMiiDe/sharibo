@@ -78,6 +78,13 @@ app-test:
 app-dev:
     cd app && npm run dev
 
+# ── Checks ───────────────────────────────────────────────────────────────────
+
+# Fast pre-commit/CI checks across the tree
+checks:
+    npm run check:stellar-sdk
+    npm run check:secrets -- --all
+
 # ── Verify (umbrella) ───────────────────────────────────────────────────────────
 # Run a complete local verification/gate for contributors. This intentionally
 # excludes the slow or networked pieces: the `e2e` job (uses testnet/friendbot)
@@ -88,7 +95,10 @@ verify:
     echo "Running verify from $root"; \
     cd "$root"; \
     set -o pipefail; \
-    s_type=0; s_eslint=0; s_deadcode=0; s_tests=0; s_cargo=0; \
+    s_checks=0; s_type=0; s_eslint=0; s_deadcode=0; s_tests=0; s_cargo=0; \
+
+    echo "\n== 0) Fast checks (stellar-sdk, secrets) =="; \
+    just checks || s_checks=1; \
 
     echo "\n== 1) TypeScript typecheck (packages/client + app if present) =="; \
     npm run -s typecheck --workspace=packages/client || s_type=1; \
@@ -110,13 +120,14 @@ verify:
     (cd contracts && cargo clippy -- -D warnings) || s_cargo=1; \
 
     echo "\nSummary:"; \
+    printf "%-36s %s\n" "Fast checks (sdk, secrets)" "$( [ $s_checks -eq 0 ] && echo PASS || echo FAIL )"; \
     printf "%-36s %s\n" "TypeScript typecheck" "$( [ $s_type -eq 0 ] && echo PASS || echo FAIL )"; \
     printf "%-36s %s\n" "ESLint" "$( [ $s_eslint -eq 0 ] && echo PASS || echo FAIL )"; \
     printf "%-36s %s\n" "Dead-code (ts-prune)" "$( [ $s_deadcode -eq 0 ] && echo PASS || echo WARN )"; \
     printf "%-36s %s\n" "Unit tests (app + client)" "$( [ $s_tests -eq 0 ] && echo PASS || echo FAIL )"; \
     printf "%-36s %s\n" "Cargo tests + clippy" "$( [ $s_cargo -eq 0 ] && echo PASS || echo FAIL )"; \
 
-    if [ $s_type -eq 0 -a $s_eslint -eq 0 -a $s_tests -eq 0 -a $s_cargo -eq 0 ]; then \
+    if [ $s_checks -eq 0 -a $s_type -eq 0 -a $s_eslint -eq 0 -a $s_tests -eq 0 -a $s_cargo -eq 0 ]; then \
         echo "\nverify: All checks passed."; \
     else \
         echo "\nverify: Some checks failed. See above for details."; \
