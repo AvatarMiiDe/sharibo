@@ -18,9 +18,6 @@ try {
 
 export default defineConfig({
   plugins: [react()],
-  define: {
-    global: "globalThis",
-  },
   test: {
     // jsdom provides a browser-like DOM environment without a real browser.
     environment: "jsdom",
