@@ -12,7 +12,9 @@ import path from "node:path";
 import { httpGetJson } from "./http.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-process.loadEnvFile(path.join(__dirname, "..", ".env"));
+// SHARIBO_ENV_FILE lets the test suite point at a throwaway fixture instead of
+// racing on the developer's real repo-root .env. Unset in normal use.
+process.loadEnvFile(process.env.SHARIBO_ENV_FILE || path.join(__dirname, "..", ".env"));
 
 const RPC_URL = process.env.STELLAR_RPC_URL;
 const HORIZON_URL =

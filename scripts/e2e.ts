@@ -316,6 +316,10 @@ async function main() {
         contribution: CONTRIBUTION,
         size: CIRCLE_SIZE,
         vk,
+        // No protocol fee for the e2e circle: it keeps the payout assertion
+        // below exact (recipient delta === pot) rather than pot-minus-fee.
+        feeBps: 0,
+        feeRecipient: admin.publicKey(),
       }),
       30_000,
       "createCircle",
@@ -353,8 +357,6 @@ async function main() {
 
   console.log("\n4. Generating a real ZK proof for member", CLAIMANT_INDEX, "...");
   const externalNullifier = await computeExternalNullifier(circleId, 0n);
-  const claimant = members[CLAIMANT_INDEX];
-  const merkleProof = tree.proof(CLAIMANT_INDEX);
   const circuitsBuildDir = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     "..",
@@ -396,6 +398,15 @@ async function main() {
 
   console.log("\n6. Claiming the pot to the fresh recipient...");
   const balanceBefore = await nativeBalance(recipient.publicKey());
+  // Simulate first so we can report the fee; the estimate is advisory, so a
+  // simulation failure must not abort the run before the claim is attempted.
+  const feeEstimate = await estimateClaimFee(adminSdk, {
+    circleId,
+    recipient: recipient.publicKey(),
+    nullifierHash,
+    externalNullifier,
+    proof,
+  });
   verbose("submitting claim transaction...");
   const claimResult = await withTimeout(
     adminSdk.claim({
@@ -424,10 +435,17 @@ async function main() {
   assert(claimedCircle.round === 1, "round should have advanced to 1");
   console.log("   payout confirmed: pot -> 0, round -> 1");
   
-  // Log fee estimate vs actual charged delta if available
-  if (feeCharged) {
-    const feeChargedNum = typeof feeCharged === "string" ? BigInt(feeCharged) : feeCharged;
-    console.log("   claim fee charged:", feeChargedNum.toString(), "stroops");
+  // Log the simulated claim fee alongside the confirmed payout.
+  if (feeEstimate) {
+    console.log(
+      "   claim fee (simulated):",
+      feeEstimate.minResourceFee.toString(),
+      "stroops min resource /",
+      feeEstimate.totalFee.toString(),
+      "stroops total",
+    );
+  } else {
+    console.log("   claim fee (simulated): unavailable (simulation failed; claim still submitted)");
   }
 
   if (SKIP_REPLAY) {

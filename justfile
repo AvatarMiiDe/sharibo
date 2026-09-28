@@ -77,6 +77,11 @@ scripts-test:
 scripts-test-live:
     npm run test:live --workspace=scripts
 
+# Run the scripts unit suite with all non-loopback network blocked. Proves the
+# default suite is hermetic (see CONTRIBUTING.md "Tests must be hermetic").
+scripts-test-offline:
+    npm run test:offline --workspace=scripts
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 # Run the app's vitest suite (headless, no server)

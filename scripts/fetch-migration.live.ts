@@ -3,6 +3,11 @@
 //   npm test          # hermetic: no host is contacted
 //   npm run test:live # this file, against real friendbot / Horizon
 //
+// The `.live.ts` suffix (not `.live.test.ts`) is deliberate: Node's `--test`
+// glob has no exclusion syntax, so a `*.test.ts` glob would match a
+// `*.live.test.ts` file and quietly run it in the default suite. A `.live.ts`
+// file can never be picked up by `*.test.ts`. See hermeticity.test.ts.
+//
 // Why it exists: it is the reachability check that used to live in the
 // hermetic suite. It is the regression guard for the original problem it
 // documents — Node's fetch/undici appearing to hang against friendbot and
