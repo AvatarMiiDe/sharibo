@@ -4,8 +4,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as url from "node:url";
 import { xdr, scValToNative } from "@stellar/stellar-sdk";
-import { fund } from "./contract.js";
+import { fund, hasClaimed } from "./contract.js";
 import { DEFAULT_RETRY_POLICY } from "./retry.js";
+import { makeCircleId, makeNullifierHash } from "./brand.js";
 
 test("transient simulate-phase failure recovers", async () => {
     let simulateCalls = 0;
@@ -32,7 +33,7 @@ test("transient simulate-phase failure recovers", async () => {
 
   const policy = { ...DEFAULT_RETRY_POLICY, sleep: async () => {} };
 
-  const result = await fund(mockClient, { circleId: 0n, from: "G..." }, policy);
+  const result = await fund(mockClient, { circleId: makeCircleId(0n), from: "G..." }, policy);
   assert.strictEqual(simulateCalls, 3);
   assert.strictEqual(signAndSendCalls, 1);
   assert.strictEqual(result.hash, "0xabc");
@@ -57,7 +58,7 @@ test("post-submit failure surfaces immediately without a second submission", asy
 
   await assert.rejects(
     async () =>
-      await fund(mockClient, { circleId: 0n, from: "G..." }, {
+      await fund(mockClient, { circleId: makeCircleId(0n), from: "G..." }, {
         ...DEFAULT_RETRY_POLICY,
         sleep: async () => {},
       }),
@@ -67,4 +68,12 @@ test("post-submit failure surfaces immediately without a second submission", asy
   assert.strictEqual(signAndSendCalls, 1);
 });
 
-// =====================================================================});
+
+test("hasClaimed catches swapped branded types at compile time", () => {
+  const mockClient = {};
+  const circleId = makeCircleId(1n);
+  const nullifierHash = makeNullifierHash(2n);
+
+  // @ts-expect-error — argument order is circleId, then nullifierHash. A swap is a type error.
+  hasClaimed(mockClient, nullifierHash, circleId);
+});

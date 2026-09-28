@@ -16,6 +16,10 @@ import {
   xlmToStroops,
   type ContractProof,
   type FeeEstimate,
+  type CircleId,
+  type NullifierHash,
+  type ExternalNullifier,
+  makeExternalNullifier,
   TREE_LEVELS,
   getArtifacts,
 } from "@sharibo/client";
@@ -53,18 +57,18 @@ export function useCircleFlow() {
   const [admin, setAdmin] = useState<Keypair | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [tree, setTree] = useState<MerkleTree | null>(null);
-  const [circleId, setCircleId] = useState<bigint | null>(null);
+  const [circleId, setCircleId] = useState<CircleId | null>(null);
   const [round, setRound] = useState(0);
   const [pot, setPot] = useState(0n);
   const [claimantIndex, setClaimantIndex] = useState(0);
   const [proof, setProof] = useState<ContractProof | null>(null);
-  const [nullifierHash, setNullifierHash] = useState<bigint | null>(null);
+  const [nullifierHash, setNullifierHash] = useState<NullifierHash | null>(null);
   const [claimResult, setClaimResult] = useState<ClaimResult | null>(null);
   const [rejection, setRejection] = useState<string | null>(null);
   const [feeEstimate, setFeeEstimate] = useState<FeeEstimate | null>(null);
   // Survives a reset so the landing screen can point back at the circle you
   // just left — it keeps living on-chain even though the UI has moved on.
-  const [previousCircleId, setPreviousCircleId] = useState<bigint | null>(null);
+  const [previousCircleId, setPreviousCircleId] = useState<CircleId | null>(null);
 
   const contribution = xlmToStroops(contributionXlm);
   const fundedCount = members.filter((m) => m.funded).length;
@@ -284,7 +288,7 @@ export function useCircleFlow() {
         const memberClient = await connect(NETWORK, m.keypair);
         await fund(memberClient, { circleId, from: m.keypair.publicKey() });
       }
-      const freshExternalNullifier = await computeExternalNullifier(circleId, BigInt(round));
+      const freshExternalNullifier = makeExternalNullifier(await computeExternalNullifier(circleId, BigInt(round)));
 
       setBusy("Replaying the used nullifier…");
       await claim(adminClient, {

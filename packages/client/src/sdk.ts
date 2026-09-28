@@ -16,6 +16,7 @@ import {
 } from "./contract.js";
 import type { ContractProof, ContractVerificationKey } from "./prove.js";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
+import type { CircleId, NullifierHash, ExternalNullifier } from "./brand.js";
 
 export interface ShariboSDKOptions {
   /** Overrides the default retry policy for every contract call made through this instance. */
@@ -36,15 +37,15 @@ export interface CreateCircleArgs {
 }
 
 export interface FundArgs {
-  circleId: bigint;
+  circleId: CircleId;
   from: string;
 }
 
 export interface ClaimArgs {
-  circleId: bigint;
+  circleId: CircleId;
   recipient: string;
-  nullifierHash: bigint;
-  externalNullifier: bigint;
+  nullifierHash: NullifierHash;
+  externalNullifier: ExternalNullifier;
   proof: ContractProof;
 }
 
@@ -112,7 +113,7 @@ export class ShariboSDK {
   }
 
   /** Creates a new circle. Mirrors the `createCircle` free function. */
-  createCircle(args: CreateCircleArgs): Promise<TxResult<bigint>> {
+  createCircle(args: CreateCircleArgs): Promise<TxResult<CircleId>> {
     return createCircle(this.client, args, this.retryPolicy);
   }
 
@@ -127,7 +128,7 @@ export class ShariboSDK {
   }
 
   /** Reads a circle's current state. Mirrors the `getCircle` free function. */
-  getCircle(circleId: bigint): Promise<CircleView> {
+  getCircle(circleId: CircleId): Promise<CircleView> {
     return getCircle(this.client, circleId, this.retryPolicy);
   }
 
@@ -147,7 +148,7 @@ export class ShariboSDK {
   }
 
   /** Pure read: whether `nullifierHash` already claimed in this circle. */
-  hasClaimed(circleId: bigint, nullifierHash: bigint): Promise<boolean> {
+  hasClaimed(circleId: CircleId, nullifierHash: NullifierHash): Promise<boolean> {
     return hasClaimed(this.client, circleId, nullifierHash, this.retryPolicy);
   }
 }

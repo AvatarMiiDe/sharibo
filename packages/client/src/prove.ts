@@ -11,6 +11,7 @@ import {
 } from "./artifacts.js";
 import { ProvingError, InvalidInputError } from "./errors.js";
 import type { OnEventFn } from "./events.js";
+import { type NullifierHash, type ExternalNullifier, makeNullifierHash, makeExternalNullifier } from "./brand.js";
 
 /**
  * Options for a proving run.
@@ -67,9 +68,9 @@ export interface GenerateProofResult {
   proof: ContractProof;
   snarkjsProof: unknown;
   publicSignals: string[];
-  nullifierHash: bigint;
+  nullifierHash: NullifierHash;
   root: bigint;
-  externalNullifier: bigint;
+  externalNullifier: ExternalNullifier;
   provingTimeMs: number;
 }
 
@@ -355,9 +356,9 @@ export async function generateProof(
   const provingTimeMs = Math.max(0, perf.now() - provingStartedAt);
 
   // publicSignals order: [nullifierHash, root, externalNullifier]
-  const nullifierHash = BigInt(publicSignals[0]);
+  const nullifierHash = makeNullifierHash(BigInt(publicSignals[0]));
   const root = BigInt(publicSignals[1]);
-  const externalNullifier = BigInt(publicSignals[2]);
+  const externalNullifier = makeExternalNullifier(BigInt(publicSignals[2]));
 
   // Encode to contract wire format
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

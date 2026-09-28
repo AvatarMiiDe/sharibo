@@ -8,7 +8,7 @@ import { decodeContractError } from "./decodeError.js";
 import { withRetry, DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
 import { validateContractProof, validateContractVerificationKey } from "./validate.js";
 import { SdkEventEmitter, type OnEventFn } from "./events.js";
-
+import { type CircleId, type NullifierHash, type ExternalNullifier, makeCircleId } from "./brand.js";
 /**
  * Configuration required to connect to the Sharibo contract.
  *
@@ -244,10 +244,10 @@ function populateTxResult<T>(
 export async function estimateClaimFee(
   client: ShariboClient,
   args: {
-    circleId: bigint;
+    circleId: CircleId;
     recipient: string;
-    nullifierHash: bigint;
-    externalNullifier: bigint;
+    nullifierHash: NullifierHash;
+    externalNullifier: ExternalNullifier;
     proof: ContractProof;
   },
 ): Promise<FeeEstimate | null> {
@@ -304,7 +304,7 @@ export async function createCircle(
     feeRecipient: string;
   },
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<TxResult<bigint>> {
+): Promise<TxResult<CircleId>> {
   if (args.size === 0 || args.contribution <= 0n || args.vk.ic.length !== 4) {
     throw new InvalidInputError(
       "InvalidCircleParams: size must be > 0, contribution must be > 0, and vk.ic must have length 4",
@@ -333,7 +333,7 @@ export async function createCircle(
       fee_recipient: args.feeRecipient,
     }), retryPolicy, client.emitter);
     const sent = await tx.signAndSend();
-    return populateTxResult(sent.result as bigint, sent);
+    return populateTxResult(makeCircleId(sent.result as bigint), sent);
   } catch (err) {
     throw decodeContractError(err);
   }
@@ -350,7 +350,7 @@ export async function createCircle(
  */
 export async function fund(
   client: ShariboClient,
-  args: { circleId: bigint; from: string },
+  args: { circleId: CircleId; from: string },
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<TxResult<void>> {
   try {
@@ -377,10 +377,10 @@ export async function fund(
 export async function claim(
   client: ShariboClient,
   args: {
-    circleId: bigint;
+    circleId: CircleId;
     recipient: string;
-    nullifierHash: bigint;
-    externalNullifier: bigint;
+    nullifierHash: NullifierHash;
+    externalNullifier: ExternalNullifier;
     proof: ContractProof;
   },
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
@@ -444,7 +444,7 @@ export interface CircleView {
  */
 export async function getCircle(
   client: ShariboClient,
-  circleId: bigint,
+  circleId: CircleId,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<CircleView> {
   // get_circle is a pure read: the SDK detects no signature is needed and
@@ -475,7 +475,7 @@ export interface CircleStatus {
 /** Pure read: the funding-progress slice of a circle's on-chain state. */
 export async function getCircleStatus(
   client: ShariboClient,
-  circleId: bigint,
+  circleId: CircleId,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<CircleStatus> {
   const circle = await getCircle(client, circleId, retryPolicy);
@@ -501,13 +501,13 @@ export async function getCircleCount(
 }
 
 /** Pure read: the current round number for `circleId`. */
-export async function getRound(client: ShariboClient, circleId: bigint): Promise<number> {
+export async function getRound(client: ShariboClient, circleId: CircleId): Promise<number> {
   const tx: ContractTx = await withRetry(() => client.get_round({ circle_id: circleId }));
   return Number(tx.result);
 }
 
 /** Pure read: the current pot balance (in token stroops) for `circleId`. */
-export async function getPot(client: ShariboClient, circleId: bigint): Promise<bigint> {
+export async function getPot(client: ShariboClient, circleId: CircleId): Promise<bigint> {
   const tx: ContractTx = await withRetry(() => client.get_pot({ circle_id: circleId }));
   return BigInt(tx.result);
 }
@@ -519,7 +519,7 @@ export async function getPot(client: ShariboClient, circleId: bigint): Promise<b
  */
 export async function getStatus(
   client: ShariboClient,
-  circleId: bigint,
+  circleId: CircleId,
 ): Promise<{ round: number; pot: bigint; target: bigint; cancelled: boolean }> {
   const tx: ContractTx = await withRetry(() => client.get_status({ circle_id: circleId }));
   const [round, pot, target, cancelled] = tx.result as
@@ -533,7 +533,7 @@ export async function getStatus(
 }
 
 /** Pure read: the ordered list of addresses that funded the current round. */
-export async function getContributors(client: ShariboClient, circleId: bigint): Promise<string[]> {
+export async function getContributors(client: ShariboClient, circleId: CircleId): Promise<string[]> {
   const tx: ContractTx = await withRetry(() => client.get_contributors({ circle_id: circleId }));
   return tx.result as string[];
 }
@@ -546,8 +546,8 @@ export async function getContributors(client: ShariboClient, circleId: bigint): 
  */
 export async function hasClaimed(
   client: ShariboClient,
-  circleId: bigint,
-  nullifierHash: bigint,
+  circleId: CircleId,
+  nullifierHash: NullifierHash,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<boolean> {
   // `has_claimed` is a pure read — don't submit or force a transaction.
@@ -573,7 +573,7 @@ export async function hasClaimed(
  */
 export async function cancelCircle(
   client: ShariboClient,
-  args: { circleId: bigint },
+  args: { circleId: CircleId },
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<TxResult<void>> {
   try {
