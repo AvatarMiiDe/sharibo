@@ -1,13 +1,14 @@
 # XDR Golden Files — issue #326
 
 This directory contains committed base64 snapshots of the Soroban XDR
-wire format for `Circle`, `VerificationKey`, and `Proof`.
+wire format for `Circle`, `CircleMeta`, `VerificationKey`, and `Proof`.
 
 ## Files
 
 | File                       | Source struct      | Rust test                     |
 |----------------------------|--------------------|-------------------------------|
 | `circle.v1.b64`            | `Circle`           | `xdr_golden::xdr_golden_circle` |
+| `circle_meta.v1.b64`       | `CircleMeta`       | `xdr_golden::xdr_golden_circle_meta` |
 | `verification_key.v1.b64`  | `VerificationKey`  | `xdr_golden::xdr_golden_verification_key` |
 | `proof.v1.b64`             | `Proof`            | `xdr_golden::xdr_golden_proof` |
 

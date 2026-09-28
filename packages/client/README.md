@@ -36,8 +36,11 @@ const { result: circleId, hash } = await sdk.createCircle({
 // Fund it (from any member's own SDK instance).
 await sdk.fund({ circleId, from: memberPublicKey });
 
-// Read state.
+// Read state. getCircle is backed by the contract's cheap get_circle_meta
+// read (no verification key on the wire); fetch the VK once via getVk and
+// let the SDK cache it per (contract, circle).
 const circle = await sdk.getCircle(circleId);
+const vk = await sdk.getVk(circleId);
 const alreadyClaimed = await sdk.hasClaimed(circleId, nullifierHash);
 
 // Claim the pot with a Groth16 proof.
@@ -111,6 +114,7 @@ createCircle
 fund
 claim
 getCircle
+getVk
 getCircleCount
 getRound
 getPot

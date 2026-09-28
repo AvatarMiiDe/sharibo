@@ -189,17 +189,19 @@ export const getCircle = vi.fn(
     size: 5,
     round: 0,
     pot: 0n,
-    vk: {
-      alpha: new Uint8Array(96),
-      beta: new Uint8Array(192),
-      gamma: new Uint8Array(192),
-      delta: new Uint8Array(192),
-      ic: [],
-    },
-    contributors: [],
     cancelled: false,
     fee_bps: 0,
     fee_recipient: "MOCK_FEE_RECIPIENT",
+  }),
+);
+
+export const getVk = vi.fn(
+  async (_client: ShariboClient, _circleId: bigint): Promise<ContractVerificationKey> => ({
+    alpha: new Uint8Array(96),
+    beta: new Uint8Array(192),
+    gamma: new Uint8Array(192),
+    delta: new Uint8Array(192),
+    ic: [new Uint8Array(96), new Uint8Array(96), new Uint8Array(96), new Uint8Array(96)],
   }),
 );
 

@@ -730,22 +730,28 @@ export default function App() {
   const syncFundingState = useCallback(async () => {
     if (!admin || circleId === null) return;
     try {
-      const { connect, getCircle } = await import("@sharibo/client");
+      const { connect, getCircle, getContributors } = await import("@sharibo/client");
       const adminClient = await connect(NETWORK, admin);
-      const circle = await getCircle(adminClient, circleId);
-      
+      // getCircle is backed by the contract's get_circle_meta read, so the
+      // poll no longer transfers the verification key (#481); the funder list
+      // comes from the dedicated cheap read.
+      const [circle, contributors] = await Promise.all([
+        getCircle(adminClient, circleId),
+        getContributors(adminClient, circleId),
+      ]);
+
       setPot(circle.pot);
-      setOnChainContributors(circle.contributors);
+      setOnChainContributors(contributors);
       setCancelled(circle.cancelled);
       setFeeBps(circle.fee_bps ?? 0);
       setFeeRecipient(circle.fee_recipient ?? "");
-      
+
       // Update member funded status based on on-chain contributors
       setMembers((prev) =>
         prev.map((m) => {
           const hasFunded =
-            circle.contributors.includes(m.keypair.publicKey()) ||
-            Boolean(m.freighterKey && circle.contributors.includes(m.freighterKey));
+            contributors.includes(m.keypair.publicKey()) ||
+            Boolean(m.freighterKey && contributors.includes(m.freighterKey));
           return { ...m, funded: hasFunded, pending: false };
         })
       );

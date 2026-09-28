@@ -19,6 +19,23 @@ strings from Stellar RPC failures and maps them to typed subclasses in
 | 8    | `CircleCancelled`     | `CircleCancelledError`    | `cancel_circle` or `fund`/`claim` called on a cancelled circle.     |
 | 9    | `InvalidFeeParams`    | — (generic `ContractError`) | `create_circle` rejected a `fee_bps` outside `0..=10_000`.         |
 
+## `CircleNotFound` coverage
+
+Every entrypoint that reads or writes a circle by id reverts with
+`CircleNotFound` (`Error(Contract, #1)`) when no circle is stored at the
+requested `circle_id`:
+
+- `create_circle` — never (it *creates* the circle).
+- `fund`, `claim`, `cancel_circle`, `propose_admin`, `accept_admin`,
+  `expire_round` — state-changing entrypoints that load the circle first.
+- `get_circle`, `get_circle_meta`, `get_vk`, `get_round`, `get_pot`,
+  `get_status`, `get_contributors` — read entrypoints.
+- `get_circle_count`, `has_claimed` — never (they tolerate unknown ids by
+  design: the count is instance-level, and `has_claimed` returns `false`).
+
+On the SDK side all of these surface as `CircleNotFoundError` via
+`decodeContractError()`, including the new `getVk` read.
+
 All subclasses extend `ContractError`, which in turn extends `ShariboError`.
 
 ## How decoding works

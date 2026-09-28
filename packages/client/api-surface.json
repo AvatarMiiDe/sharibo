@@ -22,6 +22,7 @@
     "getPot": "function",
     "getRound": "function",
     "getStatus": "function",
+    "getVk": "function",
     "hasClaimed": "function",
     "installIndicatorAndPrefetch": "function",
     "poseidon": "function",
