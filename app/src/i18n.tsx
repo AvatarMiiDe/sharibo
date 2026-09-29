@@ -52,10 +52,15 @@ function chooseInitialLocale(): LocaleCode {
   return fallbackLocale;
 }
 
+const RTL_LOCALES = new Set(["ar", "he", "fa", "ur", "ps", "yi", "ug"]);
+
+export function isRtlLocale(code: string): boolean {
+  return RTL_LOCALES.has(code.split("-")[0].toLowerCase());
+}
+
 function applyLocale(code: LocaleCode) {
   document.documentElement.lang = code;
-  const rtlLocales = new Set(["ar", "he", "fa", "ur", "ps", "yi", "ug"]);
-  document.documentElement.dir = rtlLocales.has(code.split("-")[0].toLowerCase()) ? "rtl" : "ltr";
+  document.documentElement.dir = isRtlLocale(code) ? "rtl" : "ltr";
 }
 
 function interpolate(template: string, vars?: Record<string, string | number>): string {

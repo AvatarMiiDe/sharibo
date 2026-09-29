@@ -354,7 +354,8 @@ export async function generateProof(
   );
   const provingTimeMs = Math.max(0, perf.now() - provingStartedAt);
 
-  // publicSignals order: [nullifierHash, root, externalNullifier]
+  // publicSignals order: [nullifierHash, root, externalNullifier, recipientHash]
+  // — see docs/wire-format.md
   const nullifierHash = BigInt(publicSignals[0]);
   const root = BigInt(publicSignals[1]);
   const externalNullifier = BigInt(publicSignals[2]);

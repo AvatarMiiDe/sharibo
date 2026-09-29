@@ -37,3 +37,32 @@ export function formatXlm(stroops: bigint): string {
   const fraction = remainder.toString().padStart(7, "0");
   return `${negative ? "-" : ""}${whole}.${fraction}`;
 }
+
+/**
+ * Locale-aware display formatting for XLM amounts shown in the UI.
+ *
+ * Uses `Intl.NumberFormat` with the active locale so Hindi gets lakh/crore
+ * grouping and locales that use `,` as the decimal separator render correctly.
+ *
+ * **Do not use this for anything copied, compared, or persisted** — those
+ * paths must keep {@link formatXlm}'s fixed ASCII `123.4567890` form so
+ * wire formats and tests stay locale-independent.
+ */
+export function formatXlmDisplay(
+  stroops: bigint,
+  locale: string,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  const negative = stroops < 0n;
+  const absolute = negative ? -stroops : stroops;
+  const whole = absolute / STROOPS_PER_XLM;
+  const remainder = absolute % STROOPS_PER_XLM;
+  const asNumber = Number(whole) + Number(remainder) / 1e7;
+  const formatted = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 7,
+    ...options,
+  }).format(negative ? -asNumber : asNumber);
+  return formatted;
+}
+

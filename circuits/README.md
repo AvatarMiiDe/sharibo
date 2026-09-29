@@ -1,8 +1,8 @@
 # Sharibo circuits
 
 Zero-knowledge membership circuit for Sharibo, compiled for **BLS12-381**
-(see `membership.template.circom` header and `NOTES.md` for why BLS12-381
-rather than the more common BN254).
+(see `membership.template.circom` header and [docs/adr/005-bls12-381-curve-choice.md](../docs/adr/005-bls12-381-curve-choice.md)
+for why BLS12-381 rather than the more common BN254).
 
 ## Circuit purpose
 
@@ -106,7 +106,7 @@ standalone without regenerating anything:
 - **Why BLS12-381**: Soroban provides native host functions for BLS12-381 curve pairings.
 - **Why it is preferred over bn128**: A pure-Rust BN254 (bn128) pairing check inside the contract exceeds Stellar's hard 100M CPU instruction cap per transaction. We had to use BLS12-381 across the entire stack.
 
-(See `NOTES.md` at the repo root for more context.)
+See also [docs/wire-format.md](../docs/wire-format.md) and the historical [NOTES.md](../NOTES.md) build log.
 
 ## Expected outputs
 

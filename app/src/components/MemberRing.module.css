@@ -16,10 +16,11 @@
 .ring-center {
   position: absolute;
   top: 50%;
-  left: 50%;
+  inset-inline-start: 50%;
   width: var(--ring-center-size);
   height: var(--ring-center-size);
-  margin: calc(var(--ring-center-size) / -2) 0 0 calc(var(--ring-center-size) / -2);
+  margin-top: calc(var(--ring-center-size) / -2);
+  margin-inline-start: calc(var(--ring-center-size) / -2);
   border: var(--border);
   border-radius: 50%;
   background: white;
@@ -33,10 +34,11 @@
 .ring-node {
   position: absolute;
   top: 50%;
-  left: 50%;
+  inset-inline-start: 50%;
   width: var(--ring-node-size);
   height: var(--ring-node-size);
-  margin: calc(var(--ring-node-size) / -2) 0 0 calc(var(--ring-node-size) / -2);
+  margin-top: calc(var(--ring-node-size) / -2);
+  margin-inline-start: calc(var(--ring-node-size) / -2);
   border: 2px solid var(--ink);
   border-radius: 50%;
   background: #eee;

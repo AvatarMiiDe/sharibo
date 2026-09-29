@@ -82,4 +82,12 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+
+  // Maintenance checkers + test-vector generators: plain Node ESM.
+  {
+    files: ["scripts/maintenance/**/*.mjs", "test-vectors/**/*.mjs"],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 );

@@ -33,7 +33,9 @@ All subclasses extend `ContractError`, which in turn extends `ShariboError`.
    simulation call (`withRetry`) and the submission (`signAndSend()`) in a
    `try/catch` that feeds through `decodeContractError()`.
 4. Transient RPC failures (429, 5xx) are retried with exponential backoff
-   before being wrapped in `RpcError`.
+   before being wrapped in `RpcError`. Defaults: 3 retries, 500ms base delay,
+   worst-case sleep ~3.5s (`DEFAULT_RETRY_POLICY`). Callers can override per
+   client or per call; see `packages/client/README.md` §Retries and observability.
 
 ## Usage
 

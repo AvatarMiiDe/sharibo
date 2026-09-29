@@ -2,6 +2,13 @@ const en = {
   "lang.label": "Language",
   "lang.en": "English",
   "lang.es": "Spanish",
+  "lang.ar": "Arabic",
+  "lang.fr": "French",
+  "lang.hi": "Hindi",
+  "lang.pt": "Portuguese",
+  "lang.tl": "Tagalog",
+  "lang.yo": "Yoruba",
+  "lang.zh": "Chinese",
 
   "banner.testnet": "Stellar testnet — no real funds",
   "banner.limitations": "honest limitations ↗",

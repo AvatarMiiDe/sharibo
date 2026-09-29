@@ -37,6 +37,10 @@ const CLEAN_INPUT: BundleInput = {
     zkey: "sha256:def456",
   },
   timings: { artifacts: 1100, proving: 34200, submitting: 2900 },
+  recentEvents: [
+    { type: "rpc:attempt", at: "2026-01-01T00:00:00.000Z" },
+    { type: "rpc:retry", at: "2026-01-01T00:00:00.100Z", detail: { attempt: 1, delay: 500, error: "429" } },
+  ],
   userAgent: "Mozilla/5.0 (test)",
 };
 
@@ -237,5 +241,12 @@ describe("formatBundleAsMarkdown", () => {
     const bundle = buildDebugBundle(CLEAN_INPUT);
     const md = formatBundleAsMarkdown(bundle);
     expect(md).not.toMatch(/S[A-Z2-7]{55}/);
+  });
+
+  it("includes recent SDK events in the markdown", () => {
+    const bundle = buildDebugBundle(CLEAN_INPUT);
+    const md = formatBundleAsMarkdown(bundle);
+    expect(md).toContain("#### Recent SDK events");
+    expect(md).toContain("rpc:retry");
   });
 });
