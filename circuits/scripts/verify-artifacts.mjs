@@ -5,48 +5,34 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const circuitsDir = path.resolve(scriptDir, "..");
+const buildDir = path.join(circuitsDir, "build");
 const fixHint = "run `npm run compile && npm run setup` in `circuits/`";
 
+// ── Compiled artifacts (reproducibility, issue #535) ─────────────────────────
+// These are produced by `npm run compile` and are deterministic given the
+// pinned circom version + template + config.json. They are NOT the zkey
+// (that is non-deterministic ceremony entropy, verified separately by
+// verify-setup.sh against the committed verification_key.json).
 const artifacts = [
   {
-    name: "verification_key.json",
-    filePath: path.join(circuitsDir, "verification_key.json"),
-    hashPath: path.join(circuitsDir, "verification_key.json.sha256"),
+    name: "membership.r1cs",
+    filePath: path.join(buildDir, "membership.r1cs"),
+    manifestKey: "r1cs",
   },
   {
-    name: "membership.wasm",
-    filePath: path.join(circuitsDir, "build", "membership_js", "membership.wasm"),
-    hashPath: path.join(circuitsDir, "membership.wasm.sha256"),
+    name: "membership_js/membership.wasm",
+    filePath: path.join(buildDir, "membership_js", "membership.wasm"),
+    manifestKey: "wasm",
   },
   {
-    name: "membership_final.zkey",
-    filePath: path.join(circuitsDir, "build", "membership_final.zkey"),
-    hashPath: path.join(circuitsDir, "membership_final.zkey.sha256"),
+    name: "membership.sym",
+    filePath: path.join(buildDir, "membership.sym"),
+    manifestKey: "sym",
   },
 ];
 
 function hashFile(filePath) {
   return createHash("sha256").update(readFileSync(filePath)).digest("hex");
-}
-
-function readExpectedHash(hashPath) {
-  if (!existsSync(hashPath)) return null;
-
-  const raw = readFileSync(hashPath, "utf8").trim();
-  const match = raw.match(/[A-Fa-f0-9]{64}/);
-  if (match) return match[0].toLowerCase();
-
-  try {
-    const parsed = JSON.parse(raw);
-    const candidates = [parsed.sha256, parsed.hash, parsed["verification_key.json"], parsed["membership.wasm"], parsed["membership_final.zkey"]];
-    for (const candidate of candidates) {
-      if (typeof candidate === "string") return candidate.toLowerCase();
-    }
-  } catch {
-    // ignore malformed hash manifests and fail below with a clearer message
-  }
-
-  return null;
 }
 
 function fail(message) {
@@ -62,15 +48,12 @@ const manifest = existsSync(manifestPath)
 
 for (const artifact of artifacts) {
   if (!existsSync(artifact.filePath)) {
-    fail(`${artifact.name} is missing. ${fixHint}`);
+    fail(`${artifact.name} is missing. Run \`npm run compile\` first.`);
   }
-
-  const expected = readExpectedHash(artifact.hashPath) ?? manifest[artifact.name];
-
+  const expected = manifest[artifact.manifestKey];
   if (!expected) {
-    fail(`No committed SHA-256 hash found for ${artifact.name}. ${fixHint}`);
+    fail(`No committed hash for ${artifact.name} in artifact-hashes.json. ${fixHint}`);
   }
-
   const actual = hashFile(artifact.filePath);
   if (actual !== expected.toLowerCase()) {
     fail(
