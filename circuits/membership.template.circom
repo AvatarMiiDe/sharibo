@@ -8,7 +8,7 @@ pragma circom 2.1.6;
 // pairing against a 100M budget, i.e. infeasible. So the whole pipeline
 // targets BLS12-381 instead, using a third-party Poseidon parameterization
 // for that field (circomlib's Poseidon constants are BN254-only) — see
-// NOTES.md for the full reasoning and provenance.
+// docs/adr/005-bls12-381-curve-choice.md and docs/poseidon-provenance.md.
 include "poseidon-bls12381-circom/circuits/poseidon255.circom";
 
 // Standard fixed-depth Merkle inclusion proof (the same shape used by
@@ -17,7 +17,7 @@ include "poseidon-bls12381-circom/circuits/poseidon255.circom";
 // with its sibling pathElements[i]. Reference implementations providing
 // this exact template were not present in the environment this was built
 // in, so it is written here from the well-known pattern rather than copied
-// — see NOTES.md.
+// — historical build log: NOTES.md.
 template MerkleTreeChecker(levels) {
     signal input leaf;
     signal input root;
@@ -85,7 +85,7 @@ template Sharibo(levels) {
     // public inputs (checked in the contract)
     signal input root;              // circle's committed member set
     // = SHA-256(circleId, roundIndex) mod r, reduced into the contract by
-    // the same rule (see NOTES.md — this is SHA-256, not Poseidon, by
+    // the same rule (docs/wire-format.md — SHA-256, not Poseidon, by
     // design: it binds the proof to a round outside the circuit's
     // constraint system, where Soroban has a native accelerated SHA-256 but
     // no native Poseidon; Poseidon is kept for everything hashed *inside*

@@ -65,6 +65,27 @@ export function formatXlm(stroops: bigint): string {
   return `${negative ? "-" : ""}${whole}.${fraction}`;
 }
 
+export function formatXlmDisplay(
+  stroops: bigint,
+  locale: string,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  const negative = stroops < 0n;
+  const absolute = negative ? -stroops : stroops;
+  const whole = absolute / STROOPS_PER_XLM;
+  const remainder = absolute % STROOPS_PER_XLM;
+  const asNumber = Number(whole) + Number(remainder) / 1e7;
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 7,
+    ...options,
+  }).format(negative ? -asNumber : asNumber);
+}
+
+export const DEFAULT_RETRY_POLICY = { maxRetries: 3, baseDelayMs: 500 };
+export const POLL_RETRY_POLICY = { maxRetries: 1, baseDelayMs: 250 };
+export const PATIENT_RETRY_POLICY = { maxRetries: 5, baseDelayMs: 750 };
+
 export const randomFieldElement = vi.fn((): bigint => 42n);
 
 export const poseidon = vi.fn((a: bigint, b: bigint): bigint => a ^ b);

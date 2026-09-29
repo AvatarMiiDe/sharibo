@@ -1,7 +1,18 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { I18nProvider, useI18n } from './i18n';
+
+const localeModules = import.meta.glob<{ default: Record<string, string> }>(
+  './locales/*.ts',
+  { eager: true },
+);
+
+function localeCodes(): string[] {
+  return Object.keys(localeModules)
+    .map((path) => path.match(/\.\/locales\/([a-zA-Z-]+)\.ts$/)?.[1])
+    .filter((code): code is string => Boolean(code));
+}
 
 describe('i18n', () => {
   beforeEach(() => {
@@ -64,23 +75,31 @@ describe('i18n', () => {
   });
 
   it('handles rtl locales correctly', () => {
+    localStorage.setItem('sharibo.locale', 'en');
+
     function TestComponent() {
       const { setLocale } = useI18n();
-      // Using 'ar' as it might be added later, or we can just simulate setting it
-      // if 'ar' isn't in locales, it might not switch. The code checks `dictionaries[next]`.
-      // Since we don't have 'ar' mock, let's just observe what happens if we set a dummy.
-      // Wait, setLocale checks `if (!dictionaries[next]) return;`
-      // We can mock the dictionaries indirectly or just trust the logic.
-      useEffect(() => {
-        // We'll just test that applyLocale does its job if we somehow got 'ar',
-        // but since we can't easily mock module internal dictionaries here, 
-        // we'll rely on the source test. 
-      }, []);
-      return null;
+      return (
+        <button onClick={() => setLocale('ar')} data-testid="switch-ar">
+          Switch to AR
+        </button>
+      );
     }
-    
-    // Instead of testing 'ar' which might not be in the dictionary,
-    // let's test that localStorage throwing doesn't crash.
+
+    render(
+      <I18nProvider>
+        <TestComponent />
+      </I18nProvider>
+    );
+
+    expect(document.documentElement.dir).toBe('ltr');
+
+    act(() => {
+      screen.getByTestId('switch-ar').click();
+    });
+
+    expect(document.documentElement.lang).toBe('ar');
+    expect(document.documentElement.dir).toBe('rtl');
   });
 
   it('does not crash when localStorage throws', () => {
@@ -124,5 +143,45 @@ describe('i18n', () => {
     
     getItemSpy.mockRestore();
     setItemSpy.mockRestore();
+  });
+
+  // No vitest-axe / axe-core dependency — lightweight smoke: each locale
+  // dictionary can resolve landing keys without throwing.
+  it('each locale dictionary renders landing copy without throwing', () => {
+    localStorage.setItem('sharibo.locale', 'en');
+
+    function LandingSmoke() {
+      const { t, locale, setLocale, locales } = useI18n();
+      return (
+        <div>
+          <div data-testid="locale">{locale}</div>
+          <p data-testid="tagline">{t('landing.tagline')}</p>
+          <p data-testid="launch">{t('landing.launch')}</p>
+          {locales.map((code) => (
+            <button key={code} type="button" onClick={() => setLocale(code)} data-testid={`set-${code}`}>
+              {code}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    render(
+      <I18nProvider>
+        <LandingSmoke />
+      </I18nProvider>
+    );
+
+    for (const code of localeCodes()) {
+      expect(() => {
+        act(() => {
+          screen.getByTestId(`set-${code}`).click();
+        });
+      }).not.toThrow();
+
+      expect(screen.getByTestId('locale').textContent).toBe(code);
+      expect(screen.getByTestId('tagline').textContent?.length).toBeGreaterThan(0);
+      expect(screen.getByTestId('launch').textContent?.length).toBeGreaterThan(0);
+    }
   });
 });

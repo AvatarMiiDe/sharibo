@@ -50,6 +50,29 @@ await sdk.claim({
 });
 ```
 
+### TxResult
+
+State-changing calls (`createCircle`, `fund`, `claim`, `cancelCircle`) resolve
+to a `TxResult<T>`: the decoded contract return value in `result`, plus chain
+metadata from `signAndSend()`.
+
+```ts
+const { hash, feeCharged, ledger, explorerUrl } = await sdk.claim({ ... });
+
+console.log("tx:", hash);
+if (feeCharged !== undefined) {
+  // feeCharged is bigint stroops at the SDK boundary
+  console.log("fee:", feeCharged.toString());
+}
+if (ledger !== undefined) {
+  console.log("ledger:", ledger);
+}
+// explorerUrl is set when the client was connected with a known passphrase
+if (explorerUrl) {
+  window.open(explorerUrl);
+}
+```
+
 Signing a claim still needs a ZK proof. Proving and identity math are separate
 **stateless** free functions on the same package — the SDK is for contract
 interaction only:
@@ -173,15 +196,71 @@ browser entry automatically. Node and test runners get the side-effect-free defa
 If you need the background pre-fetch in a browser app that imports the package
 directly (without a bundler resolving the `browser` condition), call
 `prefetchMembershipArtifacts()` explicitly after import. The progress UI lives
-in the app and subscribes via `subscribeToArtifactPrefetch()`.
+in the app and subscribes via `subscribeToArtifactPrefetch()`. Wire the same
+handler into artifact events with `setArtifactOnEvent(onEvent)` or
+`configureArtifacts({ onEvent })`.
 
-## Retry Semantics
+## Observability (`onEvent` / `SdkEvent`)
 
-Network requests in the Soroban testnet environment can occasionally fail due to rate limits or transient load (e.g. `429 Too Many Requests`, `503 Service Unavailable`, or timeouts).
+Pass a stable `onEvent` callback on `connect({ …, onEvent })` and
+`generateProof(…, { onEvent })` so retries and proof work are visible to the UI.
 
-The SDK automatically handles these transient failures:
-- **Simulation Phase:** Contract calls (e.g. `createCircle`, `fund`, `claim`, `getCircle`) will retry simulation/preparation steps automatically with exponential backoff.
-- **Submit Phase:** Once a transaction is signed and submitted to the network (`signAndSend`), no further automatic retries are attempted. This ensures safety against double-spend or replay issues. A failure during submission or polling will surface immediately to the caller, as the state of the transaction is ambiguous.
+`SdkEvent` is an exported discriminated union — switch on `event.type`
+exhaustively. Full table (name, payload, when it fires):
+[docs/observability.md](../../docs/observability.md).
 
-Override the policy per SDK instance with the `retryPolicy` option:
-`{ maxRetries, baseDelayMs }` (see `src/retry.ts`).
+Notable events for a claim spinner:
+
+- `rpc:retry` / `rpc:failure` — transient RPC pain and giving up (#294)
+- `proof:started` / `proof:finished` — local Groth16 work
+- `artifact:started` / `artifact:ready` / `artifact:error` — wasm/zkey download
+- `tx:submitted` / `tx:confirmed` — after `signAndSend`
+
+Keep a bounded buffer on the consumer side; the demo app’s `useSdkEvents()`
+caps at 100 entries and feeds the debug bundle.
+
+## Retries and observability
+
+Network requests in the Soroban testnet environment can occasionally fail due
+to rate limits or transient load (e.g. `429 Too Many Requests`,
+`503 Service Unavailable`, or timeouts).
+
+### What is retried
+
+- **Simulation / preparation phase:** Contract calls retry with exponential
+  backoff + jitter on transient errors only (429/5xx, timeouts, connection
+  resets, fetch failures). Deterministic `ContractError`s are **never**
+  retried — retrying them burns fees.
+- **Submit phase:** Once a transaction is signed and submitted
+  (`signAndSend`), no further automatic retries are attempted. A failure
+  during submission or polling surfaces immediately; the transaction state
+  is ambiguous and a retry could double-spend.
+
+### Default policy and named presets
+
+| Preset | `maxRetries` | `baseDelayMs` | Worst-case sleep | Use for |
+|---|---|---|---|---|
+| `POLL_RETRY_POLICY` | 1 | 250 | ~250ms | UI polling loops |
+| `DEFAULT_RETRY_POLICY` | 3 | 500 | ~3.5s | Most reads/writes |
+| `PATIENT_RETRY_POLICY` | 5 | 750 | ~23.25s | `claim` (costly to regenerate proof) |
+
+Worst-case sleep is approximately `baseDelayMs * (2^maxRetries - 1)` (upper
+bound when every retry draws the maximum 1.0× jitter). That excludes the time
+spent on the failed attempts themselves.
+
+### Configuration surface
+
+1. **Per client** — `ShariboSDK.connect(config, signer, { retryPolicy })`
+2. **Per call** — every free function in `contract.ts` and every SDK method
+   accepts an optional `retryPolicy` that overrides the client default:
+   `getCircle(client, id, POLL_RETRY_POLICY)`,
+   `claim(client, args, PATIENT_RETRY_POLICY)`.
+
+The browser app polls with `POLL_RETRY_POLICY` and claims with
+`PATIENT_RETRY_POLICY`.
+
+### Observability
+
+`withRetry` emits `rpc:attempt`, `rpc:retry`, and `rpc:success` on the
+optional `SdkEventEmitter` so a retry storm is visible rather than silent.
+Pass `{ onEvent }` via network config / client construction to subscribe.

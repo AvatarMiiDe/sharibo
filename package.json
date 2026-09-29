@@ -19,6 +19,7 @@
     "lint:dead": "knip",
     "typecheck": "npm run typecheck --workspace=packages/client",
     "check:stellar-sdk": "node scripts/maintenance/check-stellar-sdk-version.mjs",
+    "check:secrets": "node scripts/maintenance/check-secrets.mjs",
     "clean": "node scripts/maintenance/clean.mjs"
   },
   "devDependencies": {

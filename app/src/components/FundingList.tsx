@@ -42,7 +42,7 @@ export function FundingList({
                   ✓ funded ↗
                 </a>
                 {showRefundInfo && (
-                  <span className="refund-indicator" style={{ marginLeft: '0.5rem', color: 'var(--color-warning-text)' }}>
+                  <span className="refund-indicator" style={{ marginInlineStart: '0.5rem', color: 'var(--color-warning-text)' }}>
                     {t("cancel.willBeRefunded")}
                   </span>
                 )}

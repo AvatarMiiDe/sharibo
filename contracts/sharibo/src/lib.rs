@@ -16,7 +16,7 @@ use soroban_sdk::{
 ///
 /// **Cross-component invariant:** any change to this struct's wire format must
 /// be coordinated with the circuit public signals, contract `public_inputs`,
-/// and SDK encoding. See #344.
+/// and SDK encoding. See docs/wire-format.md (#344).
 #[contracttype]
 #[derive(Clone)]
 pub struct VerificationKey {
@@ -40,7 +40,7 @@ pub struct VerificationKey {
 ///
 /// **Cross-component invariant:** any change to this struct's wire format must
 /// be coordinated with the circuit public signals, contract `public_inputs`,
-/// and SDK encoding. See #344.
+/// and SDK encoding. See docs/wire-format.md (#344).
 #[contracttype]
 #[derive(Clone)]
 pub struct Proof {
@@ -238,23 +238,35 @@ pub enum Error {
     RoundNotExpired = 12,
 }
 
-/// Minimum remaining TTL (in ledgers) that triggers a `extend_ttl` call.
-///
-/// Every write entrypoint (`create_circle`, `fund`, `claim`, `cancel_circle`)
-/// calls `extend_ttl(LEDGER_THRESHOLD, LEDGER_EXTEND_TO)`. The Soroban host
-/// only performs the extension when the entry's current TTL has fallen below
-/// `LEDGER_THRESHOLD`; if it is already higher, the call is a no-op. Setting
-/// this to 100 ledgers (≈ 8 minutes at ~5 s/ledger) means that any write
-/// performed in the last few minutes of a circle's live window will refresh it
-/// to the full `LEDGER_EXTEND_TO` budget.
 /// Number of public signals the membership circuit exposes:
 /// [nullifierHash, root, externalNullifier, recipientHash].
 const PUBLIC_INPUT_COUNT: u32 = 4;
+
+/// Upper bound on [`Circle::size`]. Must equal `2^levels` from
+/// `circuits/config.json` (the Merkle tree capacity the membership circuit
+/// is generated from). Raising `levels` without bumping this constant fails
+/// the `max_circle_size_matches_circuit_levels` test.
+const MAX_CIRCLE_SIZE: u32 = 16;
 
 /// Upper bound for [`Circle::fee_bps`]: 10_000 basis points = 100% of a pot.
 /// `apply_fee` and `create_circle` share this single source of truth.
 const MAX_FEE_BASIS_POINTS: u32 = 10_000;
 
+/// Minimum remaining TTL (in ledgers) that triggers an `extend_ttl` call.
+///
+/// Every write entrypoint that touches state (`create_circle`, `fund`,
+/// `claim`, `cancel_circle`, `expire_round`, `propose_admin`, `accept_admin`)
+/// calls `extend_ttl(LEDGER_THRESHOLD, LEDGER_EXTEND_TO)` on the entries it
+/// writes. The Soroban host only performs the extension when the entry's
+/// current TTL has fallen below `LEDGER_THRESHOLD`; if it is already higher,
+/// the call is a no-op. Setting this to 100 ledgers (≈ 8 minutes at
+/// ~5 s/ledger) means that any write performed in the last few minutes of a
+/// circle's live window will refresh it to the full [`LEDGER_EXTEND_TO`]
+/// budget.
+///
+/// This value only matters for entries that are being touched. A circle that
+/// sits idle longer than [`LEDGER_EXTEND_TO`] archives regardless of the
+/// threshold (see ADR 004).
 const LEDGER_THRESHOLD: u32 = 100;
 
 /// TTL (in ledgers) that persistent and instance entries are extended to on
@@ -262,24 +274,51 @@ const LEDGER_THRESHOLD: u32 = 100;
 ///
 /// 500,000 ledgers × 5 s/ledger ≈ **29 days** of activity-triggered liveness.
 ///
-/// The Soroban network cap for persistent entry TTL is **535,679 ledgers**
-/// (≈ 30 days; see <https://developers.stellar.org/docs/tools/cli/cookbook/extend-contract-wasm>).
-/// `LEDGER_EXTEND_TO` is intentionally set just below that ceiling to leave a
-/// small safety margin while still giving circles close to the maximum window.
+/// # Network limits this was chosen against (re-check before mainnet)
 ///
-/// If a circle goes dormant (no `fund`, `claim`, or `cancel_circle` call) for
-/// longer than this window, its persistent entry will be archived. An operator
-/// must then submit a `RestoreFootprintOp` (via `stellar contract restore`)
-/// before any further interaction is possible. See `contracts/README.md §Storage
-/// lifetime` for the runbook.
+/// Soroban's TTL ceilings are **network settings**, not protocol constants.
+/// As of 2026-09 the Stellar docs / CLI cookbook report:
+///
+/// | Setting | Testnet / Mainnet (reported) | Wall-clock (~5 s/ledger) |
+/// |---|---|---|
+/// | `max_entry_ttl` | **535,679** ledgers | ≈ 31 days |
+/// | `min_persistent_entry_ttl` | **4,096** ledgers (typical) | ≈ 5.7 hours |
+///
+/// Re-check live values with:
+/// `stellar network settings` / Horizon
+/// `https://horizon.stellar.org/` (mainnet) and
+/// `https://horizon-testnet.stellar.org/` (testnet), or the
+/// [extend-contract-wasm cookbook](https://developers.stellar.org/docs/tools/cli/cookbook/extend-contract-wasm).
+/// If the network ceiling drops below this constant, every `extend_ttl` call
+/// silently clamps to the ceiling — the contract assumes the wrong lifetime
+/// with no error.
+///
+/// `LEDGER_EXTEND_TO` is intentionally set just below the documented
+/// `max_entry_ttl` ceiling to leave a small safety margin while still giving
+/// circles close to the maximum window.
+///
+/// [`Circle::round_deadline_ledgers`] is validated at create time to be
+/// strictly less than this value (0 = "no deadline" is allowed), so a round
+/// deadline can never outlive the Circle entry that `expire_round` needs.
+///
+/// If a circle goes dormant (no write entrypoint) for longer than this
+/// window, its persistent entry will be archived. An operator must then
+/// submit a `RestoreFootprintOp` (via `stellar contract restore`) before any
+/// further interaction is possible. See `contracts/README.md §Storage
+/// lifetime` and `docs/adr/004-storage-archival.md`.
 const LEDGER_EXTEND_TO: u32 = 500_000;
 
 // Compile-time sanity check: the threshold at which we re-extend must be
 // strictly less than the target we extend to, or the extension can never
-// make progress.
+// make progress. Also pin that the extend target stays below the documented
+// network max_entry_ttl (535_679) so a silent clamp cannot happen unnoticed.
 const _: () = assert!(
     LEDGER_THRESHOLD < LEDGER_EXTEND_TO,
     "LEDGER_THRESHOLD must be strictly less than LEDGER_EXTEND_TO",
+);
+const _: () = assert!(
+    LEDGER_EXTEND_TO < 535_679,
+    "LEDGER_EXTEND_TO must stay strictly below documented max_entry_ttl (535_679)",
 );
 
 /// Sharibo contract: permissionless Semaphore-style contribution circles on
@@ -383,6 +422,12 @@ impl Contract {
         }
         if fee_bps > 0 && fee_recipient == env.current_contract_address() {
             panic_with_error!(&env, Error::InvalidRecipient);
+        }
+        // A deadline of 0 means "no deadline". Any positive deadline must be
+        // strictly shorter than LEDGER_EXTEND_TO so the Circle entry cannot
+        // archive before expire_round becomes callable (issue #565).
+        if round_deadline_ledgers >= LEDGER_EXTEND_TO {
+            panic_with_error!(&env, Error::InvalidCircleParams);
         }
 
         let target = contribution
@@ -838,6 +883,9 @@ impl Contract {
         env.storage()
             .persistent()
             .extend_ttl(&pending_key, LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
 
         env.events().publish(
             (soroban_sdk::symbol_short!("prop_adm"), circle_id),
@@ -877,6 +925,9 @@ impl Contract {
         env.storage()
             .persistent()
             .extend_ttl(&circle_key, LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
         env.storage().persistent().remove(&pending_key);
 
         env.events().publish(
@@ -1015,6 +1066,9 @@ impl Contract {
         env.storage()
             .persistent()
             .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
+        env.storage()
+            .instance()
+            .extend_ttl(LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
 
         // Refund every contributor for the current (stuck) round only after
         // the circle's cancelled state has been persisted; otherwise a hostile
@@ -1052,7 +1106,7 @@ impl Contract {
     // Poseidon is used where it actually earns its keep: *inside* the
     // circuit's constraint system (commitment + nullifierHash), where a
     // SNARK-unfriendly hash like SHA-256 would cost far more constraints.
-    // See NOTES.md.
+    // See docs/wire-format.md (round-tag bytes).
     fn compute_external_nullifier(env: &Env, circle_id: u64, round: u32) -> Fr {
         let mut bytes = Bytes::new(env);
         bytes.extend_from_array(&circle_id.to_be_bytes());
@@ -1074,9 +1128,9 @@ impl Contract {
     }
 
     // Real on-chain Groth16 verification over BLS12-381, using Soroban's
-    // native accelerated pairing host functions (see NOTES.md for why
-    // BLS12-381 rather than BN254 — a pure-Rust BN254 pairing check does not
-    // fit the CPU budget). Checks the standard Groth16 pairing equation:
+    // native accelerated pairing host functions (see docs/adr/005-bls12-381-curve-choice.md
+    // and contracts/BENCHMARKS.md — pure-Rust BN254 does not fit the CPU budget).
+    // Checks the standard Groth16 pairing equation:
     // e(-A, B) * e(alpha, beta) * e(vk_x, gamma) * e(C, delta) == 1
     // where vk_x = ic[0] + sum(public_inputs[i] * ic[i+1]).
     fn verify_groth16(

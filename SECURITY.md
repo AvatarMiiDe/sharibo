@@ -33,5 +33,6 @@ If you are unable to use GitHub's private vulnerability reporting, please use ou
 Please note the following known limitations which are **not** considered qualifying vulnerabilities for the purposes of this policy:
 
 - **Deployment is testnet-only:** The current deployment operates on the Stellar testnet. No real funds are at risk.
-- **Trusted setup is currently single-party:** The trusted setup for the Groth16 circuit was run by a single party. This is a known limitation for the current development phase. A multi-party ceremony is planned for future phases.
+- **Trusted setup is currently single-party:** The trusted setup for the Groth16 circuit was run by a single party. This is a known limitation for the current development phase. A multi-party ceremony is **planned but not executed** — runbook: [docs/ceremony.md](docs/ceremony.md) (#546).
+- **Not audited:** No third-party security audit of the circuit or contract has been completed. Audit-readiness index: [docs/audit/](docs/audit/README.md) (#547).
 - For additional context, please refer to the "Honest limitations" section in the `README.md`.
