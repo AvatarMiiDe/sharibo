@@ -1,5 +1,5 @@
 /// <reference types="vitest" />
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import fs from "fs";
 import path from "path";
@@ -28,6 +28,10 @@ export default defineConfig({
     // globally before every test file.
     setupFiles: ["./src/setupTests.ts"],
     globals: true,
+    // Playwright specs live in e2e/ and run via `npm run test:e2e` (mock by
+    // default, live only with E2E_LIVE=1). They must never be collected here,
+    // so `npm test` stays fast and cannot touch a browser or the network.
+    exclude: [...configDefaults.exclude, "e2e/**"],
     // Config.ts validates VITE_* env vars at module load and the app renders
     // a blocking "setup required" screen when they're missing. Supply valid
     // values here so component tests exercise the real landing screen.
