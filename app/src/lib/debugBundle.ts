@@ -83,7 +83,9 @@ export interface DebugBundle {
  * - Stellar secret seeds: start with 'S', 56 base-32 chars.
  * - Identity scalars: 77-digit decimal bigints (field elements).
  */
-export { REDACT_PATTERNS } from "../../../scripts/maintenance/secret-patterns.mjs";
+// @ts-expect-error .mjs script module has no ambient declaration in app tsconfig
+import { REDACT_PATTERNS } from "../../../scripts/maintenance/secret-patterns.mjs";
+export { REDACT_PATTERNS };
 
 /**
  * Scan a serialised bundle string for patterns that indicate a secret leaked.
