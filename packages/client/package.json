@@ -13,6 +13,12 @@
       "browser": "./dist/index.browser.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./prove": {
+      "types": "./dist/prove.d.ts",
+      "browser": "./dist/prove.js",
+      "import": "./dist/prove.js",
+      "default": "./dist/prove.js"
     }
   },
   "description": "Client SDK for interacting with Sharibo ROSCA on Stellar Soroban",

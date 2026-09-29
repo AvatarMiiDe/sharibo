@@ -14,6 +14,8 @@ import {
   claim,
   getCircle,
   xlmToStroops,
+  POLL_RETRY_POLICY,
+  PATIENT_RETRY_POLICY,
   type ContractProof,
   type FeeEstimate,
   type CircleId,
@@ -179,7 +181,7 @@ export function useCircleFlow() {
         prev.map((mm, idx) => (idx === i ? { ...mm, funded: true, fundHash: hash } : mm)),
       );
       const adminClient = await connect(NETWORK, admin);
-      const circle = await getCircle(adminClient, circleId);
+      const circle = await getCircle(adminClient, circleId, POLL_RETRY_POLICY);
       setPot(circle.pot);
       setRound(circle.round);
     } catch (e) {
@@ -247,24 +249,28 @@ export function useCircleFlow() {
       setFeeEstimate(estimate);
 
       setBusy("Submitting the claim…");
-      const { hash, feeCharged } = await claim(adminClient, {
-        circleId,
-        recipient: recipient.publicKey(),
-        nullifierHash: generated.nullifierHash,
-        externalNullifier: generated.externalNullifier,
-        proof: generated.proof,
-      });
+      const { hash, feeCharged } = await claim(
+        adminClient,
+        {
+          circleId,
+          recipient: recipient.publicKey(),
+          nullifierHash: generated.nullifierHash,
+          externalNullifier: generated.externalNullifier,
+          proof: generated.proof,
+        },
+        PATIENT_RETRY_POLICY,
+      );
 
       setProof(generated.proof);
       setNullifierHash(generated.nullifierHash);
       setClaimResult({
         recipient: recipient.publicKey(),
         hash,
-        feeCharged,
+        feeCharged: feeCharged?.toString(),
         feeEstimate: estimate ?? undefined,
       });
 
-      const circle = await getCircle(adminClient, circleId);
+      const circle = await getCircle(adminClient, circleId, POLL_RETRY_POLICY);
       setPot(circle.pot);
       setRound(circle.round);
     } catch (e) {
@@ -291,13 +297,17 @@ export function useCircleFlow() {
       const freshExternalNullifier = makeExternalNullifier(await computeExternalNullifier(circleId, BigInt(round)));
 
       setBusy("Replaying the used nullifier…");
-      await claim(adminClient, {
-        circleId,
-        recipient: Keypair.random().publicKey(),
-        nullifierHash,
-        externalNullifier: freshExternalNullifier,
-        proof,
-      });
+      await claim(
+        adminClient,
+        {
+          circleId,
+          recipient: Keypair.random().publicKey(),
+          nullifierHash,
+          externalNullifier: freshExternalNullifier,
+          proof,
+        },
+        PATIENT_RETRY_POLICY,
+      );
       setRejection("Unexpected: the replayed claim was accepted (this should never happen).");
     } catch (e) {
       setRejection((e as Error).message);
@@ -306,7 +316,7 @@ export function useCircleFlow() {
       // for real even though the replayed claim itself was rejected.
       try {
         const adminClient = await connect(NETWORK, admin);
-        const circle = await getCircle(adminClient, circleId);
+        const circle = await getCircle(adminClient, circleId, POLL_RETRY_POLICY);
         setPot(circle.pot);
         setRound(circle.round);
       } catch {

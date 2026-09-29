@@ -257,7 +257,7 @@ describe("Sharibo membership circuit (BLS12-381)", function () {
   });
 
   // Public signal order is the trickiest invariant in the repo: snarkjs
-  // emits [nullifierHash, root, externalNullifier] - circuit output first,
+  // emits [nullifierHash, root, externalNullifier, recipientHash] — output first,
   // then the public inputs in the order they're declared in the template
   // (see prove.ts). This pins both the VALUE and the POSITION: swapping the
   // `signal input root` / `signal input externalNullifier` declarations in

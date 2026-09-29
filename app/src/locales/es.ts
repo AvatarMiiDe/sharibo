@@ -2,6 +2,13 @@ const es = {
   "lang.label": "Idioma",
   "lang.en": "Ingl\u00e9s",
   "lang.es": "Espa\u00f1ol",
+  "lang.ar": "\u00c1rabe",
+  "lang.fr": "Franc\u00e9s",
+  "lang.hi": "Hindi",
+  "lang.pt": "Portugu\u00e9s",
+  "lang.tl": "Tagalo",
+  "lang.yo": "Yoruba",
+  "lang.zh": "Chino",
 
   "banner.testnet": "Stellar testnet: sin fondos reales",
   "banner.limitations": "limitaciones honestas ↗",

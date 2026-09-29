@@ -5,9 +5,9 @@
 [![Circom 2.2.3](https://img.shields.io/badge/circom-2.2.3-orange)](circuits/README.md)
 [![Soroban SDK 23](https://img.shields.io/badge/soroban--sdk-23-1F8DD6)](contracts/Cargo.toml)
 
-**Private rotating savings circles on Stellar — the ajo / tanda / susu / tontine, with the payout anonymized by a real Groth16 zero-knowledge proof, verified on-chain.**
+**Private rotating savings circles on Stellar — the ajo / tanda / susu / tontine / جمعية, with the payout anonymized by a real Groth16 zero-knowledge proof, verified on-chain.**
 
-**ajo · esusu · tanda · cundina · susu · tontine · junta · pandero · consórcio · hui · paluwagan · chit fund**
+**ajo · esusu · tanda · cundina · susu · tontine · junta · pandero · consórcio · hui · paluwagan · chit fund · جمعية**
 
 Five members fund a shared pot. One member claims it — by proving _"I'm a genuine, un-paid member of this circle"_ without revealing **which** member. The proof is generated in the browser and verified by a Soroban contract using Stellar's native BLS12-381 pairing host functions. No mock. No stub. No trusted server.
 
@@ -25,19 +25,20 @@ A **rotating savings and credit association** (ROSCA) is one of the oldest finan
 
 **Where the names come from:**
 
-| Name | Region / Community |
-|---|---|
-| **ajo** / **esusu** | Nigeria, West Africa (Yoruba) |
-| **tanda** | Mexico, Latin America |
-| **susu** | Ghana, the Caribbean |
-| **tontine** | Francophone Africa, France (origin: 17th-c. Italian *tontina*) |
-| **cundina** | Colombia |
-| **junta** | Peru, Dominican Republic |
-| **pandero** | Venezuela |
-| **consórcio** | Brazil |
-| **hui** | China, Taiwan, Chinese diaspora |
-| **paluwagan** | Philippines |
-| **chit fund** | India (registered, regulated variant) |
+| Name | Region / Community | Locale | Review |
+|---|---|---|---|
+| **ajo** / **esusu** | Nigeria, West Africa (Yoruba) | yo | machine |
+| **tanda** | Mexico, Latin America | es | native |
+| **susu** | Ghana, the Caribbean | en (no dedicated) | — |
+| **tontine** | Francophone Africa, France (origin: 17th-c. Italian *tontina*) | fr | machine |
+| **cundina**, **junta**, **pandero** | Colombia / Peru, Dominican Republic / Venezuela | es | native |
+| **consórcio** | Brazil | pt | machine |
+| **hui** | China, Taiwan, Chinese diaspora | zh | machine |
+| **paluwagan** | Philippines | tl | machine |
+| **chit fund** | India (registered, regulated variant) | hi | machine |
+| **جمعية** / **gam'eya** | Arabic-speaking world | ar | machine |
+
+`en` and `es` are the reviewed, complete locales. Other locale files may be machine-translated stubs or partials; **`ar` is the RTL proof locale** (sets `dir="rtl"` and exercises logical CSS).
 
 **Why privacy matters:** In a traditional ROSCA, everyone knows who collected the pot this round. That transparency is fine when the group is small and offline — but put the same circle on a public blockchain and suddenly every deposit and payout is visible to *the entire world*. Sharibo's zero-knowledge proof restores the privacy boundary the original social structure assumes: the contract knows *that* the claimant is a rightful member (via the ZK proof and the group's Merkle root), but **no observer — not even the other members — can link the payout address back to a specific member**. The circle stays on-chain; the connections stay off it.
 
@@ -109,9 +110,10 @@ Full structured breakdown — assets, adversaries, and which code enforces each 
 
 - **Claim-side privacy only.** Funding is fully public, by scope: shielded deposits are a different (harder) problem — roadmap.
 - **One round demoed**, not a full multi-round rotation with on-chain turn ordering.
-- **Testnet + test token**; single-party trusted setup (fine for a demo, not production).
+- **Testnet + test token**; single-party trusted setup (fine for a demo, not production). Planned multi-party runbook: [docs/ceremony.md](docs/ceremony.md) (#546) — **not executed yet**.
 - **Poseidon-over-BLS12-381 constants come from a third-party package** — modulus cross-checked against Soroban's own constant and structurally reviewed (8 full + 56 partial rounds, x⁵ S-box), but not independently audited. See canonical details in [docs/poseidon-provenance.md](docs/poseidon-provenance.md).
-- Nothing is silently faked; every simplification is disclosed here, in code comments, and in [NOTES.md](NOTES.md). Details: [breakdown §18](full_product_breakdown.md#18-honest-limitations).
+- **Not audited.** Audit-readiness materials (repro steps, scope draft, negative-test inventory) live in [docs/audit/](docs/audit/README.md) (#547) — not an audit report.
+- Nothing is silently faked; every simplification is disclosed here, in code comments, and in the historical [NOTES.md](NOTES.md) build log. Details: [breakdown §18](full_product_breakdown.md#18-honest-limitations).
 
 ## Tests
 
@@ -192,11 +194,12 @@ Circuit: `circuits/membership.circom`. Contract: `contracts/sharibo/src/lib.rs`.
 
 ### Invariants held across circuit / contract / client
 
-- **BLS12-381** throughout — not the more common BN254/bn128. Stellar's Soroban host only accelerates BLS12-381 pairing operations; a pure-Rust BN254 pairing check measured ~560M CPU instructions against a 100M budget (see `NOTES.md`), so BN254 verification doesn't fit at all. This is the single biggest deviation from a "default" ZK stack and is documented in detail in `NOTES.md`.
+- **BLS12-381** throughout — not the more common BN254/bn128. Stellar's Soroban host only accelerates BLS12-381 pairing operations; a pure-Rust BN254 pairing check measured ~560M CPU instructions against a 100M budget ([ADR 005](docs/adr/005-bls12-381-curve-choice.md), [contracts/BENCHMARKS.md](contracts/BENCHMARKS.md)), so BN254 verification doesn't fit at all.
 - **Commitment:** `leaf = Poseidon(identityNullifier, identitySecret)`.
 - **Nullifier:** `nullifierHash = Poseidon(identityNullifier, externalNullifier)` — Poseidon is used here and for the Merkle tree because it's cheap _inside the circuit's constraint system_.
-- **Round tag:** `externalNullifier = SHA256(circle_id, round) mod r` — **not** Poseidon. This binding happens outside the circuit (in the contract and in the client, not inside the SNARK), where Soroban has a native accelerated SHA-256 and no native Poseidon at all, so nothing is gained by matching the circuit's hash choice there. Deliberate and permanent, not a placeholder — see `NOTES.md`.
-- **Public signal order:** `[nullifierHash, root, externalNullifier]` (circuit output first, then declared public inputs, in that order) — this is what circom/snarkjs actually emit, not the `[root, externalNullifier, nullifierHash]` a naive reading might assume. Circuit, contract, and client all agree on this order.
+- **Round tag:** `externalNullifier = SHA256(circle_id, round) mod r` — **not** Poseidon. This binding happens outside the circuit (in the contract and in the client, not inside the SNARK), where Soroban has a native accelerated SHA-256 and no native Poseidon at all, so nothing is gained by matching the circuit's hash choice there. Deliberate and permanent, not a placeholder — [docs/wire-format.md](docs/wire-format.md).
+- **Public signal order:** `[nullifierHash, root, externalNullifier, recipientHash]` (circuit output first, then declared public inputs, in that order) — this is what circom/snarkjs actually emit, not the `[root, externalNullifier, nullifierHash]` a naive reading might assume. Circuit, contract, and client must agree ([docs/wire-format.md](docs/wire-format.md), [ADR 006](docs/adr/006-recipient-binding.md)).
+- **Poseidon constants:** [docs/poseidon-provenance.md](docs/poseidon-provenance.md).
 - **Field:** BLS12-381 scalar field throughout (client, contract, circuit).
 
 ## Run it
@@ -221,6 +224,16 @@ Install the Rust target after installing Rust:
 ```bash
 rustup target add wasm32v1-none
 ```
+
+After installing the tools above, run the doctor to verify your setup before continuing:
+
+```bash
+just doctor
+# or, without just:
+npm run doctor --workspace=scripts
+```
+
+The doctor checks the tools above plus `curl`, `.env` validity, circuit test dependencies, the built client SDK, and verified circuit artifacts. It reports what was found vs. required, gives a fix command and troubleshooting link for failures, and exits non-zero only for blocking failures. Run `just doctor --fix` to apply mechanical fixes such as installing the Rust target or building the SDK. See [docs/troubleshooting.md](docs/troubleshooting.md) for the symptom→cause reference that backs each check.
 
 ### 1. Install and configure
 
@@ -292,7 +305,7 @@ Runs a full round against testnet for real: creates a 5-member circle, funds it 
 | `--reuse-circle <id>` | Skip circle creation; run against an existing circle |
 | `--verbose` | Echo each RPC/curl interaction for debugging |
 
-> This script shells out to `curl` for friendbot/Horizon calls rather than using `fetch()` — see `NOTES.md` if you're curious why. Run it in the foreground (not backgrounded) for the same reason.
+> Run `npm run e2e` in the foreground when debugging hangs — see [docs/canary.md](docs/canary.md). HTTP client choice is documented historically in [NOTES.md](NOTES.md) Phase 4.
 
 ### 6. Browser demo
 
@@ -323,13 +336,14 @@ To change the depth:
 sharibo/
 ├── circuits/            membership.template.circom (source) + config.json, compile/setup/prove scripts, circuit tests, verification_key.json
 ├── contracts/sharibo/   the Soroban contract (lib.rs) + its test suite (test.rs)
+├── packages/core/       shared crypto primitives (Poseidon, Merkle, identity)
 ├── packages/client/     isomorphic TS SDK: identity.ts, tree.ts, prove.ts, contract.ts, config.ts
 ├── test-vectors/        cross-implementation Poseidon fixtures shared by the client and circuit test suites
-├── scripts/e2e.ts       full-round Node script against live testnet
-├── scripts/smoke.ts     read-only deployment health check (no transactions)
+├── scripts/             e2e/smoke helpers + maintenance checkers (secrets, SDK pin, clean)
 ├── app/                 React + Vite browser demo
+├── docs/                long-form docs, ADRs, and docs/hackathon/ (point-in-time archive)
 ├── README.md            this file
-├── NOTES.md             the raw build/decision log — what was discovered, when, and why
+├── NOTES.md             historical append-only build log (not the authority for current invariants)
 ├── full_product_breakdown.md  every facet of the system, in detail
 └── docs/hackathon/hackathon_demo_script.md   demo video script (motion + voiceover)
 ```

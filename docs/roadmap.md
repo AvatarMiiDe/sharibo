@@ -25,11 +25,11 @@ what groundwork already exists, as opposed to being silent about it:
 
 ## 1. Cryptographic
 
-- [ ] **Run a genuine multi-party trusted-setup ceremony.** The plan is documented (#74, closed), but execution hasn't happened — the deployed vk is single-contributor. Until this runs, the setup runner is a full break of the membership property for every circle using that vk (`docs/threat-model.md` § Adversaries). *Tracking issue for the actual run: not yet filed.*
-- [ ] **Independent third-party audit of the ZK circuit** (`circuits/membership.template.circom`). 🔒 **Hard prerequisite, not a nice-to-have** — nothing below substitutes for this. *Not yet filed.*
+- [ ] **Run a genuine multi-party trusted-setup ceremony.** Runbook: [docs/ceremony.md](ceremony.md). Tracking issue: **#546**. The deployed vk remains single-contributor until this completes — the setup runner is a full break of the membership property for every circle using that vk (`docs/threat-model.md` § Adversaries).
+- [ ] **Independent third-party audit of the ZK circuit** (`circuits/membership.template.circom`). 🔒 **Hard prerequisite, not a nice-to-have** — nothing below substitutes for this. Audit package prep: [docs/audit/](audit/README.md), tracking issue **#547**.
 - [ ] **Bind the payout recipient to the proof.** Today `claim` accepts any `recipient` for a valid `(nullifier_hash, external_nullifier, proof)` tuple — a front-running/hijack risk, not a privacy break (`docs/threat-model.md` § "No double claim", limit 1). Core issue: #246. Candidate fixes: add `recipientHash` as a circuit public input (#266), or an arity-3 commitment binding a payout address at join time (#275). Narrower interim mitigation: reject `recipient == contract's own address` (#259). Risk write-up: #339.
 - [ ] **Verification-key provenance and integrity.** Pin and document the provenance of the committed `verification_key.json` (#274); run `snarkjs zkey verify` as part of the setup script (#271); verify circuit artifact integrity before the app copies them into `public/` (#273).
-- [ ] **Wire-format invariants** documented in one place, referenced from circuit, contract, and client, so a byte-encoding drift across languages can't reintroduce a silent proof-verification bug (#344).
+- [ ] **Wire-format invariants** documented in one place, referenced from circuit, contract, and client, so a byte-encoding drift across languages can't reintroduce a silent proof-verification bug (#344). Authoritative doc: [docs/wire-format.md](wire-format.md).
 - [ ] **Mutation testing for the SDK's crypto module** (#327) — raises confidence that the client-side crypto tests actually catch regressions, not just exercise the happy path.
 
 ## 2. Contract

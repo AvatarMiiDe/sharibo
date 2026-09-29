@@ -12,8 +12,8 @@ set working-directory := '.'
 # ── Doctor ───────────────────────────────────────────────────────────────────
 
 # Run the toolchain doctor script (checks Rust, stellar CLI, Node, circom, just)
-doctor:
-    npm run doctor --workspace=scripts
+doctor *ARGS:
+    npm run doctor --workspace=scripts -- {{ARGS}}
 
 # ── Circuits ──────────────────────────────────────────────────────────────────
 
@@ -33,17 +33,14 @@ contract:
     cd contracts && stellar contract build
 
 # Generate (or regenerate) the XDR golden files for Circle / VerificationKey /
-# Proof.  Run this whenever you intentionally change the wire format, then
-# commit the updated .b64 files alongside the struct change.
-#
-# After running this, also update packages/client/src/contract.test.ts if
-# any expected field values or struct shapes changed, and bump SCHEMA_VERSION
-# in contracts/sharibo/src/test.rs.
+# Proof. Full workflow (schema bump, client tests, commit steps) lives in
+# contracts/sharibo/test_snapshots/xdr_goldens/README.md — start there.
 xdr-goldens:
     cd contracts && UPDATE_GOLDEN=1 cargo test -p sharibo xdr_golden
     @echo ""
     @echo "Goldens written to contracts/sharibo/test_snapshots/xdr_goldens/"
-    @echo "Review with: git diff --stat contracts/sharibo/test_snapshots/xdr_goldens/"
+    @echo "See contracts/sharibo/test_snapshots/xdr_goldens/README.md for follow-up steps."
+    @echo "Review with: git diff --stat contracts/sharibo/test_snapshots/xdr_goldens/ test-vectors/xdr/"
 # ── Dead-code check ───────────────────────────────────────────────────────────
 
 # Check for unused files, exports, and dependencies across all TS workspaces.
@@ -200,25 +197,41 @@ verify: client
     npm run lint
 
 # Run coverage for all workspaces and print a short per-workspace summary.
-# This is a local instrument (not a merge gate). It runs each workspace's
-# test command with coverage enabled and emits the report locations.
+# Contracts coverage is a hard floor: cargo-llvm-cov --fail-under-lines reads
+# coverage-thresholds.json (see contracts/README.md). Missing llvm-cov fails
+# the recipe — do not swallow it with `|| true`.
 coverage:
-    @echo 'Collecting coverage for: app, packages/client, scripts, contracts'
-    # App (vitest will write to coverage/app)
-    cd app && npm test || true
-    # Client (vitest will write to coverage/packages-client)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo 'Collecting coverage for: app, packages/client, scripts, contracts'
+    # App / client / scripts stay best-effort (JS thresholds are separate).
+    (cd app && npm test) || true
     npm run test --workspace=packages/client || true
-    # Scripts (node --test may be used by the scripts workspace)
     npm run test --workspace=scripts || true
-    # Contracts (cargo-llvm-cov must be installed; see contracts/README.md)
-    cd contracts && cargo llvm-cov --workspace --tests --lcov --output-path coverage || true
-    @echo
-    @echo 'Summary:'
-    @printf '%-25s %-12s %s\n' "Workspace" "Report" "Notes"
-    @printf '%-25s %-12s %s\n' "app" "coverage/app" "vitest + v8"
-    @printf '%-25s %-12s %s\n' "packages/client" "coverage/packages-client" "vitest + v8"
-    @printf '%-25s %-12s %s\n' "scripts" "(scripts test may output coverage)" "node --test"
-    @printf '%-25s %-12s %s\n' "contracts" "contracts/coverage" "cargo llvm-cov (HTML/lcov)"
+    # Contracts: require cargo-llvm-cov and enforce the ratchet floor.
+    if ! command -v cargo-llvm-cov >/dev/null 2>&1 && ! cargo llvm-cov --version >/dev/null 2>&1; then
+      echo 'error: cargo-llvm-cov is not installed. Run: cargo install cargo-llvm-cov' >&2
+      echo '       (or `just doctor` — the check is optional but recommended)' >&2
+      exit 1
+    fi
+    THRESHOLD="$(python3 -c 'import json; print(json.load(open("coverage-thresholds.json"))["contracts"]["lines"])')"
+    echo "Contracts line-coverage floor: ${THRESHOLD}%"
+    mkdir -p contracts/coverage
+    (cd contracts && cargo llvm-cov --workspace --tests \
+      --ignore-filename-regex='(/tests?/|test\.rs$)' \
+      --lcov --output-path coverage/lcov.info)
+    # Threshold check is on `report` — the test invocation does not always
+    # propagate --fail-under-lines when tests themselves succeed.
+    (cd contracts && cargo llvm-cov report \
+      --ignore-filename-regex='(/tests?/|test\.rs$)' \
+      --fail-under-lines "${THRESHOLD}")
+    echo
+    echo 'Summary:'
+    printf '%-25s %-28s %s\n' "Workspace" "Report" "Notes"
+    printf '%-25s %-28s %s\n' "app" "coverage/app" "vitest + v8"
+    printf '%-25s %-28s %s\n' "packages/client" "coverage/packages-client" "vitest + v8"
+    printf '%-25s %-28s %s\n' "scripts" "(scripts workspace)" "node --test"
+    printf '%-25s %-28s %s\n' "contracts" "contracts/coverage/lcov.info" "cargo llvm-cov (floor ${THRESHOLD}%)"
 
 # Refresh the committed contract CPU benchmark table
 bench-contract:
