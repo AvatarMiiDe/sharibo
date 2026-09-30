@@ -42,7 +42,13 @@ The compiled WASM artifact will be generated at `target/wasm32v1-none/release/sh
 
 **Privacy note**: contributor addresses are already public (funding is unshielded). Storing and iterating them for refunds imposes no additional privacy loss _today_. However it constrains a future shielded-funding design, which would need to avoid recording funder addresses on-chain — see issue #82.
 
-To execute the test suite, run the following command from the `contracts/` directory:
+To check formatting (which relies strictly on defaults with no `rustfmt.toml`), run the linter, and execute the test suite, run the following commands from the `contracts/` directory:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
 
 ## Storage lifetime
 

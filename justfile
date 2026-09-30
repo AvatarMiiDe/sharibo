@@ -29,6 +29,8 @@ circuits:
 
 # Run contract unit tests and build wasm binary
 contract:
+    cd contracts && cargo fmt --check
+    cd contracts && cargo clippy --all-targets -- -D warnings
     cd contracts && cargo test
     cd contracts && stellar contract build
 
@@ -107,7 +109,8 @@ verify:
 
     echo "\n== 5) Cargo tests & clippy =="; \
     (cd contracts && cargo test) || s_cargo=1; \
-    (cd contracts && cargo clippy -- -D warnings) || s_cargo=1; \
+    (cd contracts && cargo fmt --check) || s_cargo=1; \
+    (cd contracts && cargo clippy --all-targets -- -D warnings) || s_cargo=1; \
 
     echo "\nSummary:"; \
     printf "%-36s %s\n" "TypeScript typecheck" "$( [ $s_type -eq 0 ] && echo PASS || echo FAIL )"; \
@@ -192,9 +195,7 @@ test:
 all: circuits contract test
     @echo 'All recipes completed (e2e skipped — uses testnet funds/friendbot quota)'
 
-# Verify: run lint and client checks
-verify: client
-    npm run lint
+
 
 # Run coverage for all workspaces and print a short per-workspace summary.
 # Contracts coverage is a hard floor: cargo-llvm-cov --fail-under-lines reads

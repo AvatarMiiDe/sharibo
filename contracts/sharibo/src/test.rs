@@ -1,12 +1,12 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::testutils::Events as _;
-use soroban_sdk::Symbol;
 use ark_bls12_381::{Fq, Fq2, Fr as ArkFr};
 use ark_ff::{BigInteger, PrimeField};
 use ark_serialize::CanonicalSerialize;
 use core::str::FromStr;
+use soroban_sdk::testutils::Events as _;
+use soroban_sdk::Symbol;
 use soroban_sdk::{
     crypto::bls12_381::{G1_SERIALIZED_SIZE, G2_SERIALIZED_SIZE},
     symbol_short,
@@ -303,7 +303,10 @@ fn round_reuse_proof_round1(env: &Env) -> Proof {
 // identity as real_nullifier_hash() — deliberately a different value
 // because externalNullifier changed, even though identityNullifier didn't.
 fn round_reuse_nullifier_hash_round1(env: &Env) -> Fr {
-    fr_from_dec_str(env, "49427450209661096950044132594013152139023072336714402456973658706693457893626")
+    fr_from_dec_str(
+        env,
+        "49427450209661096950044132594013152139023072336714402456973658706693457893626",
+    )
 }
 
 fn create_token(env: &Env, admin: &Address) -> Address {
@@ -342,7 +345,17 @@ fn setup(size: u32, contribution: i128) -> Setup {
     // which were generated for circle_id=0.
     let root = real_root(&env);
     let vk = real_verification_key(&env);
-    let circle_id = client.create_circle(&admin, &token, &root, &contribution, &size, &0u32, &vk, &0u32, &Address::generate(&env));
+    let circle_id = client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &contribution,
+        &size,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
     assert_eq!(circle_id, 0);
 
     let mut members: StdVec<Address> = StdVec::new();
@@ -567,12 +580,12 @@ fn claim_reverts_on_tampered_public_input() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")] // RoundNotFunded
-// Ideally we'd pin pot == contribution*size - 1 (the single stroop
-    // short of full) as the tightest possible underfunded case. But `fund`
-    // only ever moves whole `contribution`-sized deposits — there's no way
-    // to land the pot on a non-multiple-of-contribution value through the
-    // public API. The tightest *reachable* underfunded state is one missing
-    // depositor, so that's what this test pins instead.
+                                                  // Ideally we'd pin pot == contribution*size - 1 (the single stroop
+                                                  // short of full) as the tightest possible underfunded case. But `fund`
+                                                  // only ever moves whole `contribution`-sized deposits — there's no way
+                                                  // to land the pot on a non-multiple-of-contribution value through the
+                                                  // public API. The tightest *reachable* underfunded state is one missing
+                                                  // depositor, so that's what this test pins instead.
 fn claim_reverts_when_underfunded() {
     let s = setup(5, 100);
     let client = ContractClient::new(&s.env, &s.client_id);
@@ -709,7 +722,17 @@ fn same_identity_can_claim_two_consecutive_rounds() {
     let root = real_root(&env);
     let vk = round_reuse_verification_key(&env);
     let contribution: i128 = 100;
-    let circle_id = client.create_circle(&admin, &token, &root, &contribution, &1u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    let circle_id = client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &contribution,
+        &1u32,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
 
     // ---- round 0: fund and claim with the real identity ----
     let funder = Address::generate(&env);
@@ -821,7 +844,17 @@ fn create_circle_requires_admin_auth() {
 
     let root = real_root(&env);
     let vk = real_verification_key(&env);
-    client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &100i128,
+        &5u32,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
 
     let auths = env.auths();
     assert_eq!(auths.len(), 1);
@@ -906,7 +939,17 @@ fn create_circle_emits_created_event() {
     let vk = real_verification_key(&env);
     let contribution: i128 = 100;
     let size: u32 = 5;
-    let circle_id = client.create_circle(&admin, &token, &root, &contribution, &size, &0u32, &vk, &0u32, &Address::generate(&env));
+    let circle_id = client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &contribution,
+        &size,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
 
     let env_ref = env.clone();
     let events = env.events().all();
@@ -999,20 +1042,20 @@ fn max_circle_size_matches_circuit_levels() {
     // bumping `levels` in circuits/config.json without updating MAX_CIRCLE_SIZE
     // fails this test, forcing a deliberate review of the contract constant
     // (and a redeploy, since the bound is compiled into the WASM).
-    let config_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../circuits/config.json");
+    let config_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../circuits/config.json");
     let contents = std::fs::read_to_string(&config_path)
         .expect("circuits/config.json not found; run tests from a full checkout");
 
-    let levels = parse_config_levels(&contents)
-        .unwrap_or_else(|| panic!("circuits/config.json must contain a numeric \"levels\" field: {contents}"));
+    let levels = parse_config_levels(&contents).unwrap_or_else(|| {
+        panic!("circuits/config.json must contain a numeric \"levels\" field: {contents}")
+    });
 
     // 2^levels computed in u64 so an absurdly deep circuit still yields a
     // clean assertion failure instead of an integer-overflow panic.
     let capacity = 1u64 << levels;
     assert_eq!(
-        MAX_CIRCLE_SIZE as u64,
-        capacity,
+        MAX_CIRCLE_SIZE as u64, capacity,
         "MAX_CIRCLE_SIZE must equal 2^levels ({capacity}) from circuits/config.json \
          — update the constant (and redeploy the contract) when the circuit depth changes",
     );
@@ -1056,8 +1099,7 @@ fn fund_emits_funded_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (event_from, new_pot, target): (Address, i128, i128) =
-        data.try_into_val(&s.env).unwrap();
+    let (event_from, new_pot, target): (Address, i128, i128) = data.try_into_val(&s.env).unwrap();
     assert_eq!(event_from, from);
     assert_eq!(new_pot, s.contribution);
     assert_eq!(target, s.contribution * (s.size as i128));
@@ -1101,8 +1143,7 @@ fn claim_emits_claimed_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (round, amount, event_recipient): (u32, i128, Address) =
-        data.try_into_val(&s.env).unwrap();
+    let (round, amount, event_recipient): (u32, i128, Address) = data.try_into_val(&s.env).unwrap();
     assert_eq!(round, 0);
     assert_eq!(amount, s.contribution * (s.size as i128));
     assert_eq!(event_recipient, recipient);
@@ -1135,8 +1176,7 @@ fn cancel_circle_emits_cancelled_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (refunded_count, refunded_total): (u32, i128) =
-        data.try_into_val(&s.env).unwrap();
+    let (refunded_count, refunded_total): (u32, i128) = data.try_into_val(&s.env).unwrap();
     assert_eq!(refunded_count, 2);
     assert_eq!(refunded_total, s.contribution * 2i128);
 }
@@ -1157,10 +1197,30 @@ fn get_circle_count_tracks_next_circle_id() {
     let root = real_root(&env);
     let vk = real_verification_key(&env);
 
-    client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &100i128,
+        &5u32,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
     assert_eq!(client.get_circle_count(), 1);
 
-    client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &100i128,
+        &5u32,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
     assert_eq!(client.get_circle_count(), 2);
 }
 
@@ -1298,7 +1358,17 @@ fn cpu_instruction_benchmarks() {
     let token = create_token(&env, &token_admin);
     let root = real_root(&env);
     let vk = real_verification_key(&env);
-    client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &100i128,
+        &5u32,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
     let create_cpu = env.cost_estimate().budget().cpu_instruction_cost();
     std::println!("bench create_circle: {create_cpu} CPU instructions");
 
@@ -1550,9 +1620,16 @@ fn cancel_zero_contributors_is_clean_close() {
     client.cancel_circle(&s.circle_id);
 
     let circle_after = client.get_circle(&s.circle_id);
-    assert_eq!(circle_after.pot, 0, "pot must remain 0 after cancelling an empty circle");
+    assert_eq!(
+        circle_after.pot, 0,
+        "pot must remain 0 after cancelling an empty circle"
+    );
     assert!(circle_after.cancelled, "circle must be marked cancelled");
-    assert_eq!(circle_after.contributors.len(), 0, "contributors vec must stay empty");
+    assert_eq!(
+        circle_after.contributors.len(),
+        0,
+        "contributors vec must stay empty"
+    );
 
     // No tokens moved: contract balance is still 0.
     assert_eq!(
@@ -1714,7 +1791,17 @@ fn instance_ttl_extended_after_create_fund_claim() {
     let vk = real_verification_key(&env);
 
     // create_circle must extend instance TTL.
-    client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &100i128,
+        &5u32,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
 
     // Advance the ledger by LEDGER_THRESHOLD so the instance entry would
     // expire without the extension; the TTL should now be refreshed.
@@ -1832,7 +1919,10 @@ fn create_circle_rejects_deadline_at_or_above_ledger_extend_to() {
             &Address::generate(&env),
         );
     }));
-    assert!(result.is_err(), "deadline == LEDGER_EXTEND_TO must be rejected");
+    assert!(
+        result.is_err(),
+        "deadline == LEDGER_EXTEND_TO must be rejected"
+    );
 }
 
 #[test]
@@ -1964,11 +2054,11 @@ mod legal {
 }
 
 mod proptest_circle_invariants {
-    use super::*;
     use super::legal::{self, LegalAction};
+    use super::*;
     use proptest::prelude::*;
-    use std::collections::BTreeSet;
     use proptest::test_runner::TestCaseError;
+    use std::collections::BTreeSet;
 
     /// Tracked token flows for the conservation property.
     struct Flows {
@@ -2009,7 +2099,10 @@ mod proptest_circle_invariants {
         for i in 0..c.nullifiers.len() {
             let n = c.nullifiers.get(i).unwrap();
             let bytes = n.to_bytes().to_array();
-            prop_assert!(seen.insert(bytes), "duplicate nullifier in circle.nullifiers");
+            prop_assert!(
+                seen.insert(bytes),
+                "duplicate nullifier in circle.nullifiers"
+            );
             prop_assert!(
                 client.has_claimed(&circle_id, &n),
                 "has_claimed must agree with nullifiers membership"
@@ -2563,7 +2656,8 @@ mod xdr_golden {
         let dir = goldens_dir();
         std::fs::create_dir_all(&dir).expect("could not create xdr_goldens directory");
         let path = dir.join(name);
-        std::fs::write(&path, content).unwrap_or_else(|e| panic!("could not write golden {name}: {e}"));
+        std::fs::write(&path, content)
+            .unwrap_or_else(|e| panic!("could not write golden {name}: {e}"));
         // Also mirror under repo test-vectors/ for the TypeScript encoder suite.
         if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
             let tv = PathBuf::from(&manifest)
@@ -2639,7 +2733,10 @@ mod xdr_golden {
         // A layout change without bumping SCHEMA_VERSION must fail here:
         // create_circle writes schema_version=2 and the golden fixture must
         // embed the same constant.
-        assert_eq!(SCHEMA_VERSION, 2, "keep in sync with Circle::schema_version in lib.rs");
+        assert_eq!(
+            SCHEMA_VERSION, 2,
+            "keep in sync with Circle::schema_version in lib.rs"
+        );
         let env = Env::default();
         let circle = golden_circle(&env);
         assert_eq!(circle.schema_version, SCHEMA_VERSION);
@@ -2671,7 +2768,8 @@ mod xdr_golden {
         use soroban_sdk::xdr::FromXdr;
         let env = Env::default();
         let circle = golden_circle(&env);
-        let recovered = Circle::from_xdr(&env, &circle.clone().to_xdr(&env)).expect("Circle::from_xdr");
+        let recovered =
+            Circle::from_xdr(&env, &circle.clone().to_xdr(&env)).expect("Circle::from_xdr");
         assert_eq!(recovered.schema_version, circle.schema_version);
         assert_eq!(recovered.contribution, circle.contribution);
         assert_eq!(recovered.size, circle.size);
@@ -2679,7 +2777,10 @@ mod xdr_golden {
         assert_eq!(recovered.pot, circle.pot);
         assert_eq!(recovered.cancelled, circle.cancelled);
         assert_eq!(recovered.fee_bps, circle.fee_bps);
-        assert_eq!(recovered.round_deadline_ledgers, circle.round_deadline_ledgers);
+        assert_eq!(
+            recovered.round_deadline_ledgers,
+            circle.round_deadline_ledgers
+        );
         assert_eq!(recovered.root.to_xdr(&env), circle.root.to_xdr(&env));
     }
 
@@ -2688,7 +2789,8 @@ mod xdr_golden {
         use soroban_sdk::xdr::FromXdr;
         let env = Env::default();
         let proof = real_valid_proof(&env);
-        let recovered = Proof::from_xdr(&env, &proof.clone().to_xdr(&env)).expect("Proof::from_xdr");
+        let recovered =
+            Proof::from_xdr(&env, &proof.clone().to_xdr(&env)).expect("Proof::from_xdr");
         assert_eq!(recovered.a.to_xdr(&env), proof.a.to_xdr(&env));
         assert_eq!(recovered.b.to_xdr(&env), proof.b.to_xdr(&env));
         assert_eq!(recovered.c.to_xdr(&env), proof.c.to_xdr(&env));
@@ -2699,8 +2801,8 @@ mod xdr_golden {
         use soroban_sdk::xdr::FromXdr;
         let env = Env::default();
         let vk = real_verification_key(&env);
-        let recovered =
-            VerificationKey::from_xdr(&env, &vk.clone().to_xdr(&env)).expect("VerificationKey::from_xdr");
+        let recovered = VerificationKey::from_xdr(&env, &vk.clone().to_xdr(&env))
+            .expect("VerificationKey::from_xdr");
         assert_eq!(recovered.alpha.to_xdr(&env), vk.alpha.to_xdr(&env));
         assert_eq!(vk.ic.len(), recovered.ic.len());
     }

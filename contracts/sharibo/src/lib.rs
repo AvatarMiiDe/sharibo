@@ -1,11 +1,15 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)] // TODO: refactor to struct args (#456)
+
 #[cfg(test)]
 extern crate std;
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype,
     crypto::bls12_381::{Fr, G1Affine, G2Affine},
-    panic_with_error, symbol_short, token, vec, xdr::ToXdr, Address, Bytes, Env, Vec,
+    panic_with_error, symbol_short, token, vec,
+    xdr::ToXdr,
+    Address, Bytes, Env, Vec,
 };
 
 /// Groth16 verification key over BLS12-381.
@@ -358,11 +362,11 @@ impl Contract {
     ///   is eligible to claim. Stored in [`Circle::root`].
     /// * `contribution` — fixed amount each [`Self::fund`] deposits.
     ///   Stored in [`Circle::contribution`].
-/// * `size` — number of funders needed to fill a round. `pot_target =
-///   contribution * size`. Stored in [`Circle::size`]. Capped at
-///   [`MAX_CIRCLE_SIZE`] (the Merkle tree's capacity); a larger size is
-///   rejected with [`Error::InvalidCircleParams`] since no more than
-///   2^levels members can ever prove membership.
+    /// * `size` — number of funders needed to fill a round. `pot_target =
+    ///   contribution * size`. Stored in [`Circle::size`]. Capped at
+    ///   [`MAX_CIRCLE_SIZE`] (the Merkle tree's capacity); a larger size is
+    ///   rejected with [`Error::InvalidCircleParams`] since no more than
+    ///   2^levels members can ever prove membership.
     /// * `vk` — Groth16 verification key for the membership circuit.
     ///   Stored in [`Circle::vk`].
     /// * `fee_bps` — protocol fee in basis points (`0..=10_000`; `10_000`
@@ -388,6 +392,7 @@ impl Contract {
     /// * [`Error::InvalidFeeParams`] — `fee_bps` outside `0..=10_000`.
     /// * [`Error::InvalidRecipient`] — `fee_bps > 0` but `fee_recipient` is
     ///   the contract's own address, which would strand the fee forever.
+    #[allow(deprecated)] // TODO(#476): Migrate to #[contractevent]
     pub fn create_circle(
         env: Env,
         admin: Address,
@@ -521,6 +526,7 @@ impl Contract {
     ///   exact-equality check. See `contracts/README.md`.
     /// * [`Error::Overflow`] — `contribution * size` (computed via
     ///   `pot_target`) or `pot + contribution` overflows `i128`.
+    #[allow(deprecated)] // TODO(#476): Migrate to #[contractevent]
     pub fn fund(env: Env, circle_id: u64, from: Address) {
         from.require_auth();
 
@@ -632,6 +638,7 @@ impl Contract {
     /// * [`Error::InvalidProof`] — check 4 failed.
     /// * [`Error::Overflow`] — computing `contribution * size` overflows
     ///   `i128` (absurd parameters set at circle creation).
+    #[allow(deprecated)] // TODO(#476): Migrate to #[contractevent]
     pub fn claim(
         env: Env,
         circle_id: u64,
@@ -706,11 +713,7 @@ impl Contract {
         let (fee, net) = apply_fee(&env, circle.fee_bps, payout);
         let token_client = token::Client::new(&env, &circle.token);
         if fee > 0 {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &circle.fee_recipient,
-                &fee,
-            );
+            token_client.transfer(&env.current_contract_address(), &circle.fee_recipient, &fee);
         }
         token_client.transfer(&env.current_contract_address(), &recipient, &net);
 
@@ -864,6 +867,7 @@ impl Contract {
     ///
     /// Reverts with [`Error::CircleCancelled`] on a cancelled circle — there
     /// is no point transferring admin rights once the circle is closed.
+    #[allow(deprecated)] // TODO(#476): Migrate to #[contractevent]
     pub fn propose_admin(env: Env, circle_id: u64, new_admin: Address) {
         let key = DataKey::Circle(circle_id);
         let circle: Circle = env
@@ -898,6 +902,7 @@ impl Contract {
     ///
     /// Only the address stored by [`Self::propose_admin`] may call this.
     /// Reverts with [`Error::CircleCancelled`] on a cancelled circle.
+    #[allow(deprecated)] // TODO(#476): Migrate to #[contractevent]
     pub fn accept_admin(env: Env, circle_id: u64) {
         let circle_key = DataKey::Circle(circle_id);
         let mut circle: Circle = env
@@ -957,6 +962,7 @@ impl Contract {
     /// - Increments `circle.round` so old proof round-tags are invalidated.
     /// - Resets `pot`, `contributors`, and `round_started_ledger`.
     /// - Emits a `rnd_exp` event.
+    #[allow(deprecated)] // TODO(#476): Migrate to #[contractevent]
     pub fn expire_round(env: Env, circle_id: u64) {
         let key = DataKey::Circle(circle_id);
         let mut circle: Circle = env
@@ -1046,6 +1052,7 @@ impl Contract {
     ///
     /// * [`Error::CircleNotFound`] — `circle_id` does not exist.
     /// * [`Error::CircleCancelled`] — circle was already cancelled.
+    #[allow(deprecated)] // TODO(#476): Migrate to #[contractevent]
     pub fn cancel_circle(env: Env, circle_id: u64) {
         let key = DataKey::Circle(circle_id);
         let mut circle = load_active_circle(&env, circle_id);
@@ -1091,7 +1098,11 @@ impl Contract {
         }
 
         env.events().publish(
-            (symbol_short!("circle"), symbol_short!("cancelled"), circle_id),
+            (
+                symbol_short!("circle"),
+                symbol_short!("cancelled"),
+                circle_id,
+            ),
             (refunded_count, refunded_total),
         );
     }
