@@ -15,6 +15,7 @@ each covers and where to find it.
 | [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) | Contributor code of conduct |
 | [`SECURITY.md`](../SECURITY.md) | Security policy and responsible disclosure |
 | [`LICENSE`](../LICENSE) | Project license |
+| [`CHANGELOG.md`](../CHANGELOG.md) | Keep-a-Changelog release history (see Releases in CONTRIBUTING) |
 
 ## Hackathon-era artifacts (`docs/hackathon/` — point-in-time archive, not maintained)
 
@@ -42,7 +43,7 @@ an archive is allowed to contain stale claims.
 | [`threat-model.md`](threat-model.md) | Assets, adversaries, and which code enforces each property |
 | [`troubleshooting.md`](troubleshooting.md) | Common setup and proof-verification failures |
 | [`observability.md`](observability.md) | SDK `SdkEvent` taxonomy (`onEvent`) for retries, proofs, artifacts, transactions |
-| [`deployment.md`](deployment.md) | How the live browser demo is built and manually deployed to Vercel |
+| [`deployment.md`](deployment.md) | Browser demo deploys plus releases and the Deployments table (tag -> contract ID -> schema -> vk hash) |
 | [`glossary.md`](glossary.md) | Plain-language crypto + ROSCA terms |
 
 ## Architecture decision records (`docs/adr/`)
