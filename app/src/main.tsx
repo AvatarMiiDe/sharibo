@@ -1,7 +1,14 @@
-import { Buffer } from "buffer";
-// @stellar/stellar-sdk expects Node's Buffer/global to exist; Vite doesn't
-// polyfill these automatically like older webpack setups did.
-(globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
+// A handful of transitive browser dependencies still reference the bare
+// identifier `global`. Assigning it once at startup is a precise, zero-cost
+// runtime shim; the old build-time `define: { global: "globalThis" }` in
+// vite.config.ts / vitest.config.ts was removed because it text-substituted
+// *every* occurrence of `global` (including inside dependencies) and masked
+// genuine Node-only imports instead of surfacing them.
+//
+// Note there is deliberately no `Buffer` polyfill here: the app targets
+// @stellar/stellar-sdk ^16, which imports cleanly with no Node APIs (guarded
+// by packages/client/src/node-import.test.ts), and packages/client hands
+// snarkjs Uint8Array/ArrayBuffer values, which need no polyfill in the browser.
 (globalThis as unknown as { global: typeof globalThis }).global = globalThis;
 
 // snarkjs's file-loading (via the `fastfile` package) branches on the
