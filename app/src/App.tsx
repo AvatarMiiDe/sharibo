@@ -1,13 +1,4 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Keypair } from "@stellar/stellar-sdk";
-import {
-  isConnected,
-  requestAccess,
-  isAllowed,
-  getAddress,
-  getNetworkDetails,
-  signTransaction as freighterSignTx
-} from "@stellar/freighter-api";
 import {
   generateIdentity,
   computeExternalNullifier,
@@ -61,7 +52,15 @@ import {
   friendbotFund as fundWithFriendbot,
 } from "./lib/friendbot";
 import styles from "./App.module.css";
-import { checkNetworkMatch } from "./lib/wallet.freighter";
+import {
+  createDemoSigner,
+  demoSignerFromSecret,
+  isFreighterAvailable,
+  randomDemoAddress,
+  selectSigner,
+  toShariboSigner,
+  type Signer,
+} from "./lib/wallet";
 import { Toaster } from "./components/Toaster";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
@@ -349,7 +348,8 @@ function CopyDebugBundleButton({
 }
 
 interface Member {
-  keypair: Keypair;
+  signer: Signer;
+  address: string;
   identity: Identity;
   funded: boolean;
   fundHash?: string;
@@ -658,7 +658,7 @@ export default function App() {
   const [hasFreighter, setHasFreighter] = useState(false);
 
   useEffect(() => {
-    isConnected().then((res) => setHasFreighter(res.isConnected)).catch(() => setHasFreighter(false));
+    isFreighterAvailable().then(setHasFreighter);
   }, []);
   const [round, setRound] = useState(0);
   const [pot, setPot] = useState(0n);
@@ -752,7 +752,7 @@ export default function App() {
       setMembers((prev) =>
         prev.map((m) => {
           const hasFunded =
-            circle.contributors.includes(m.keypair.publicKey()) ||
+            circle.contributors.includes(m.address) ||
             Boolean(m.freighterKey && circle.contributors.includes(m.freighterKey));
           return { ...m, funded: hasFunded, pending: false };
         })
@@ -843,7 +843,7 @@ export default function App() {
         const client = await import("@sharibo/client");
         const { computeExternalNullifier, computeNullifierHash, connect, hasClaimed } = client;
         const external = await computeExternalNullifier(circleId, BigInt(round));
-        const adminClient = await connect(NETWORK, admin);
+        const adminClient = await connect(NETWORK, await toShariboSigner(admin));
         const results = await Promise.all(
           members.map(async (m) => {
             const nullifier = computeNullifierHash(m.identity.identityNullifier, external);
@@ -919,7 +919,7 @@ export default function App() {
     setScreen("landing");
   }
 
-  function loadState(parsed: any) {
+  async function loadState(parsed: any) {
     setCirclePhase("loading");
     setContributionXlm(String(parsed.contributionXlm ?? "10"));
     setAdmin(Keypair.fromSecret(parsed.adminSecret));
@@ -979,22 +979,26 @@ export default function App() {
       "Generating a fresh admin + 5 member identities and funding via friendbot…",
     );
     try {
-      const [{ Keypair }, client] = await Promise.all([
-        import("@stellar/stellar-sdk"),
-        import("@sharibo/client")
-      ]);
+      const client = await import("@sharibo/client");
       const { generateIdentity, MerkleTree, verificationKeyToContractFormat, connect, createCircle } = client;
 
       setBusy(t("busy.generating"));
-      const adminKp = Keypair.random();
-      await fundWithFriendbot(adminKp.publicKey());
+      const adminSigner = await createDemoSigner(NETWORK.networkPassphrase);
+      const adminAddress = await adminSigner.publicKey();
+      await fundWithFriendbot(adminAddress);
 
-      const newMembers: Member[] = Array.from({ length: CIRCLE_SIZE }, () => ({
-        keypair: Keypair.random(),
-        identity: generateIdentity(),
-        funded: false,
-        ineligible: false,
-      }));
+      const newMembers: Member[] = await Promise.all(
+        Array.from({ length: CIRCLE_SIZE }, async () => {
+          const signer = await createDemoSigner(NETWORK.networkPassphrase);
+          return {
+            signer,
+            address: await signer.publicKey(),
+            identity: generateIdentity(),
+            funded: false,
+            ineligible: false,
+          };
+        }),
+      );
 
       const newTree = MerkleTree.create(
         LEVELS,
@@ -1008,17 +1012,17 @@ export default function App() {
       const vk = verificationKeyToContractFormat(vkJson);
       const adminClient = await connect({ ...NETWORK, onEvent }, adminKp);
       const { result: newCircleId } = await createCircle(adminClient, {
-        admin: adminKp.publicKey(),
+        admin: adminAddress,
         token: TOKEN,
         root: newTree.root,
         contribution: validatedStroops,
         size: CIRCLE_SIZE,
         vk,
         feeBps: 0,
-        feeRecipient: adminKp.publicKey(),
+        feeRecipient: adminAddress,
       });
 
-      setAdmin(adminKp);
+      setAdmin(adminSigner);
       setMembers(newMembers);
       setTree(newTree);
       setCircleId(makeCircleId(newCircleId));
@@ -1057,10 +1061,7 @@ export default function App() {
     setError(null);
     setBusy(t("fund.busy", { index: i + 1 }));
     try {
-      const [{ Keypair }, { connect, fund }] = await Promise.all([
-        import("@stellar/stellar-sdk"),
-        import("@sharibo/client")
-      ]);
+      const { connect, fund } = await import("@sharibo/client");
       const m = members[i];
       await fundWithFriendbot(m.keypair.publicKey());
 
@@ -1074,7 +1075,7 @@ export default function App() {
       const memberClient = await connect(NETWORK, m.keypair);
       const { hash } = await fund(memberClient, {
         circleId,
-        from: m.keypair.publicKey(),
+        from,
       });
 
       // Sync with on-chain state after submission
@@ -1160,7 +1161,7 @@ export default function App() {
       );
 
       const { connect, fund } = await import("@sharibo/client");
-      const memberClient = await connect(NETWORK, freighterSigner);
+      const memberClient = await connect(NETWORK, await toShariboSigner(signer));
       const { hash } = await fund(memberClient, {
         circleId,
         from: pubKey,
@@ -1259,8 +1260,8 @@ export default function App() {
       );
 
       setClaimStage("funding");
-      const recipient = Keypair.random();
-      await fundWithFriendbot(recipient.publicKey());
+      const recipient = await randomDemoAddress();
+      await fundWithFriendbot(recipient);
 
       if (signal.aborted) return;
       setClaimStage("submitting");
@@ -1281,7 +1282,7 @@ export default function App() {
       setProof(generated.proof);
       setNullifierHash(generated.nullifierHash);
       setClaimResult({
-        recipient: recipient.publicKey(),
+        recipient,
         hash,
         proofDurationMs: generated.provingTimeMs,
         verifyTimeMs,
@@ -1310,10 +1311,7 @@ export default function App() {
     setRejection(null);
     setBusy(t("busy.refunding"));
     try {
-      const [{ Keypair }, { connect, fund, computeExternalNullifier, claim }] = await Promise.all([
-        import("@stellar/stellar-sdk"),
-        import("@sharibo/client")
-      ]);
+      const { connect, fund, computeExternalNullifier, claim } = await import("@sharibo/client");
       // Fund round `round` again so this exercises the nullifier-reuse
       // check specifically, not just "the pot is empty" — the same
       // proof's nullifier gets rejected even against a fresh, funded round.
@@ -1370,7 +1368,7 @@ export default function App() {
     setBusy(t("cancel.busy"));
     try {
       const { connect, cancelCircle } = await import("@sharibo/client");
-      const adminClient = await connect(NETWORK, admin);
+      const adminClient = await connect(NETWORK, await toShariboSigner(admin));
       await cancelCircle(adminClient, { circleId });
 
       // Sync with on-chain state after cancellation
