@@ -18,7 +18,17 @@ fn cpu_instruction_benchmarks() {
     let token = create_token(&env, &token_admin);
     let root = real_root(&env);
     let vk = real_verification_key(&env);
-    client.create_circle(&admin, &token, &root, &100i128, &5u32, &vk);
+    client.create_circle(
+        &admin,
+        &token,
+        &root,
+        &100i128,
+        &5u32,
+        &0u32,
+        &vk,
+        &0u32,
+        &Address::generate(&env),
+    );
     let create_cpu = env.cost_estimate().budget().cpu_instruction_cost();
     std::println!("bench create_circle: {create_cpu} CPU instructions");
 

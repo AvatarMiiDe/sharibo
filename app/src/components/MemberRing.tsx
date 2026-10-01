@@ -24,6 +24,7 @@ export function useRingRadius(): number {
 // picker below) ever knows which one actually did.
 import type { Member } from "../types.js";
 import { useI18n } from "../i18n.js";
+import styles from "./MemberRing.module.css";
 
 export function MemberRing({
   members,
@@ -37,9 +38,9 @@ export function MemberRing({
   const center = 170;
 
   return (
-    <div className="ring-wrap">
+    <div className={styles.ringWrap}>
       <svg
-        className="ring"
+        className={styles.ring}
         viewBox="0 0 340 340"
         width="100%"
         role="img"
@@ -50,7 +51,7 @@ export function MemberRing({
           cy={center}
           r={radius}
           fill="none"
-          className="ring-circle"
+          className={styles.ringCircle}
         />
 
         <text
@@ -58,7 +59,7 @@ export function MemberRing({
           y={center}
           textAnchor="middle"
           dominantBaseline="middle"
-          className="ring-center"
+          className={styles.ringCenter}
         >
           {revealed ? "✓" : "pot"}
         </text>
@@ -71,7 +72,7 @@ export function MemberRing({
           return (
             <g
               key={i}
-              className={`ring-node ${m.funded ? "funded" : ""} ${m.ineligible ? "ineligible" : ""}`}
+              className={`${styles.ringNode} ${m.funded ? styles.funded : ""} ${m.ineligible ? styles.ineligible : ""}`}
               aria-label={`member ${i + 1}${m.ineligible ? ", ineligible: already claimed" : ""}`}
             >
               <circle cx={x} cy={y} r="20" />
@@ -88,7 +89,7 @@ export function MemberRing({
         })}
 
         {revealed && (
-          <g className="ring-node ring-recipient">
+          <g className={`${styles.ringNode} ${styles.ringRecipient}`}>
             <circle cx={center} cy="0" r="20" />
             <text
               x={center}
@@ -103,7 +104,7 @@ export function MemberRing({
       </svg>
 
       {revealed && (
-        <p className="ring-caption">
+        <p className={styles.ringCaption}>
           Payout landed on the address above — cryptographically, it could be
           tied to <em>any</em> of the 5 members in the ring. An outside
           observer cannot tell which.
@@ -116,9 +117,9 @@ export function MemberRing({
 export function MemberRingSkeleton() {
   const radius = 100;
   return (
-    <div className="ring-wrap" aria-hidden="true">
-      <div className="ring">
-        <div className="skeleton skeleton-ring-center" />
+    <div className={styles.ringWrap} aria-hidden="true">
+      <div className={styles.ring}>
+        <div className={`${styles.skeleton} ${styles.skeletonRingCenter}`} />
         {Array.from({ length: 5 }, (_, i) => {
           const angle = (i / 5) * 2 * Math.PI - Math.PI / 2;
           const x = Math.round(Math.cos(angle) * radius);
@@ -126,7 +127,7 @@ export function MemberRingSkeleton() {
           return (
             <div
               key={i}
-              className="skeleton skeleton-ring-node"
+              className={`${styles.skeleton} ${styles.skeletonRingNode}`}
               style={{ transform: `translate(${x}px, ${y}px)` }}
             />
           );
