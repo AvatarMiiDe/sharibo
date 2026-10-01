@@ -1,4 +1,4 @@
-# ADR 003: Evaluate LeanIMT (dynamic-depth Merkle tree) to replace the fixed-depth tree
+# ADR 008: Evaluate LeanIMT (dynamic-depth Merkle tree) to replace the fixed-depth tree
 
 - **Status:** Rejected
 - **Date:** 2026-08-31
