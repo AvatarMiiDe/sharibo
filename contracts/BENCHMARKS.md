@@ -2,6 +2,8 @@
 
 This document details the CPU instruction consumption and budget analysis for the **Sharibo** Soroban smart contract operations on Stellar.
 
+For off-chain proving wall-clock benchmarks on the client, see [packages/client/BENCHMARKS.md](../packages/client/BENCHMARKS.md).
+
 ---
 
 ## 1. Overview & Constraints
@@ -81,7 +83,7 @@ This table is refreshed by the benchmark test:
 just bench-contract
 ```
 
-The committed values are generated from the current Soroban SDK and should be
+The committed values are generated from the current Soroban SDK on **rustc 1.94.1**, and should be
 reviewed whenever contract logic or dependencies change.
 
 | Entrypoint | CPU instructions | Budget headroom |
