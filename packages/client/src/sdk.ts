@@ -18,7 +18,10 @@ import type { ContractProof, ContractVerificationKey } from "./prove.js";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
 
 export interface ShariboSDKOptions {
-  /** Overrides the default retry policy for every contract call made through this instance. */
+  /**
+   * Default retry policy for every contract call made through this instance.
+   * Individual methods accept an optional per-call override that takes precedence.
+   */
   retryPolicy?: RetryPolicy;
 }
 
@@ -67,7 +70,7 @@ export class ShariboSDK {
   readonly networkConfig: ShariboNetworkConfig;
   /** The raw contract client. Exposed for escape hatches the facade doesn't cover yet. */
   readonly client: ShariboClient;
-  /** The retry policy applied to every contract call through this instance. */
+  /** The default retry policy applied when a call does not pass its own. */
   readonly retryPolicy: RetryPolicy;
   /** Public key of the signer this instance transacts as. */
   readonly publicKey: string;
@@ -111,29 +114,33 @@ export class ShariboSDK {
     );
   }
 
+  private policy(override?: RetryPolicy): RetryPolicy {
+    return override ?? this.retryPolicy;
+  }
+
   /** Creates a new circle. Mirrors the `createCircle` free function. */
-  createCircle(args: CreateCircleArgs): Promise<TxResult<bigint>> {
-    return createCircle(this.client, args, this.retryPolicy);
+  createCircle(args: CreateCircleArgs, retryPolicy?: RetryPolicy): Promise<TxResult<bigint>> {
+    return createCircle(this.client, args, this.policy(retryPolicy));
   }
 
   /** Funds a circle from `args.from`. Mirrors the `fund` free function. */
-  fund(args: FundArgs): Promise<TxResult<void>> {
-    return fund(this.client, args, this.retryPolicy);
+  fund(args: FundArgs, retryPolicy?: RetryPolicy): Promise<TxResult<void>> {
+    return fund(this.client, args, this.policy(retryPolicy));
   }
 
   /** Claims the pot for `args.recipient`. Mirrors the `claim` free function. */
-  claim(args: ClaimArgs): Promise<TxResult<void>> {
-    return claim(this.client, args, this.retryPolicy);
+  claim(args: ClaimArgs, retryPolicy?: RetryPolicy): Promise<TxResult<void>> {
+    return claim(this.client, args, this.policy(retryPolicy));
   }
 
   /** Reads a circle's current state. Mirrors the `getCircle` free function. */
-  getCircle(circleId: bigint): Promise<CircleView> {
-    return getCircle(this.client, circleId, this.retryPolicy);
+  getCircle(circleId: bigint, retryPolicy?: RetryPolicy): Promise<CircleView> {
+    return getCircle(this.client, circleId, this.policy(retryPolicy));
   }
 
   /** Pure read: how many circles have been created on this contract. */
-  getCircleCount(): Promise<bigint> {
-    return getCircleCount(this.client, this.retryPolicy);
+  getCircleCount(retryPolicy?: RetryPolicy): Promise<bigint> {
+    return getCircleCount(this.client, this.policy(retryPolicy));
   }
 
   /**
@@ -142,12 +149,16 @@ export class ShariboSDK {
    * over the contract's existing read (there is no `get_status` contract
    * method), so this is an alias for `getCircleCount`.
    */
-  getStatus(): Promise<bigint> {
-    return this.getCircleCount();
+  getStatus(retryPolicy?: RetryPolicy): Promise<bigint> {
+    return this.getCircleCount(retryPolicy);
   }
 
   /** Pure read: whether `nullifierHash` already claimed in this circle. */
-  hasClaimed(circleId: bigint, nullifierHash: bigint): Promise<boolean> {
-    return hasClaimed(this.client, circleId, nullifierHash, this.retryPolicy);
+  hasClaimed(
+    circleId: bigint,
+    nullifierHash: bigint,
+    retryPolicy?: RetryPolicy,
+  ): Promise<boolean> {
+    return hasClaimed(this.client, circleId, nullifierHash, this.policy(retryPolicy));
   }
 }

@@ -23,6 +23,12 @@ We use a set of topic labels to categorize issues and pull requests. These label
 | refactor | Code structure improvements | Codebase-wide |
 | performance | Speed & resource usage | Performance-critical code |
 | roadmap | Larger feature from the roadmap | Planned features |
+| architecture | Structural / design decisions | Architecture proposals, ADRs |
+| tech-debt | Known shortcuts to pay down | Deferred cleanups |
+| observability | Logging, metrics, tracing | Observability code |
+| i18n | Internationalization | User-facing strings |
+| harden | Robustness hardening | Input validation, error paths |
+| api | Public API surface | SDK exports, contract entrypoints |
 
 ### GitHub Default Labels
 
@@ -55,11 +61,41 @@ We use a set of topic labels to categorize issues and pull requests. These label
 
 ## Review expectations
 
-This repo has **no CI**, so human review is the gate — a merged PR is effectively the last check before the code lands. `.github/CODEOWNERS` requests the owning reviewers automatically on every PR.
+This repo historically had **no CI**, so human review remains the primary gate — a merged PR is effectively the last check before the code lands. Contract line-coverage is now also enforced in GitHub Actions (`.github/workflows/coverage.yml`) against `coverage-thresholds.json`. `.github/CODEOWNERS` requests the owning reviewers automatically on every PR.
 
 - **Reviewers confirm the gate passed on the merge result.** Because there is no CI, the reviewer is responsible for confirming the local verification gate passes on the **merge result**, not just on the branch as it was pushed. Today that means running `just all` (circuit tests, contract tests, client typecheck; e2e separately), and the umbrella `just verify` recipe that codifies this is tracked in issue [#222](https://github.com/crackedstudio/sharibo/issues/222) — merge conflicts resolved carelessly are how landed work gets silently reverted.
 - **Security-critical paths require a domain reviewer.** `circuits/**` and `contracts/**` changes must be reviewed by someone who reads circom / Rust respectively, not just by whoever happens to be around.
-- **The wire-format boundary needs review on all three sides.** Any PR touching circuit public signals (`circuits/`), contract `public_inputs` (`contracts/`), or SDK encoding (`packages/client/`) must be reviewed on all three sides. The public signal order `[nullifierHash, root, externalNullifier]` and the BLS12-381 field encoding are load-bearing invariants that only hold if circuit, contract, and client agree.
+- **The wire-format boundary needs review on all three sides.** Any PR touching circuit public signals (`circuits/`), contract `public_inputs` (`contracts/`), or SDK encoding (`packages/client/`) must be reviewed on all three sides. The public signal order `[nullifierHash, root, externalNullifier, recipientHash]` and the BLS12-381 field encoding are load-bearing invariants that only hold if circuit, contract, and client agree — see [docs/wire-format.md](docs/wire-format.md).
+
+## Accessibility
+
+**The bar for this repo is WCAG 2.1 Level AA**, and it is enforced, not
+aspirational. `app/src/a11y.test.tsx` runs axe-core against every screen and
+asserts zero violations; `app/src/a11y.styles.test.ts` checks the colour
+tokens and the `prefers-reduced-motion` / `prefers-color-scheme` media
+queries in `app/src/style.css`. Both run in the **App** GitHub Actions
+workflow. Treat an a11y regression the same way you would a failing test.
+
+Two things to know before you touch the UI:
+
+- **Contrast is checked at the token level, not by axe.** jsdom implements
+  almost none of the CSS cascade, so axe's `color-contrast` rule reports
+  nothing useful in a unit test. `a11y.styles.test.ts` parses `style.css` and
+  computes the WCAG ratios directly, which is why adding a new text colour
+  means adding it to the `PAIRS` list in that file too.
+- **Some contrast failures are known and pinned.** Writing the guard surfaced
+  real AA shortfalls, mostly in the dark theme, where the
+  `prefers-color-scheme: dark` block overrides `--ink`/`--bg`/`--card` but not
+  the light-only `--surface-*` and `--text-*` tokens. Each is listed in
+  `KNOWN_SHORTFALLS` and pinned with `it.fails`, so the suite stays green
+  while the defect stays visible. **Fixing one of those colours makes its
+  `it.fails` go red** — that is the signal to delete the entry, not a bug in
+  the guard. Do not add a new entry to silence a failing test.
+
+The audience is ROSCA participants worldwide, including on low-end devices and
+screen readers, so keyboard reachability, visible focus, and the polite live
+region are load-bearing. A change that makes the UI quieter for sighted users
+is a regression even when it looks like a cleanup.
 
 ## Filing an issue
 
@@ -68,6 +104,8 @@ Use the templates in `.github/ISSUE_TEMPLATE/`: **Bug Report** for defects, **Fe
 ## Picking an Issue
 
 When looking for issues to work on, start by filtering by the `good first issue` label. These issues are specifically marked as suitable for newcomers and provide a great way to get familiar with the codebase. Before you start working on an issue, leave a comment to claim it and let the maintainers know you're working on it. If you have questions about the issue or need clarification, ask them directly on the issue rather than in a pull request—this helps keep the PR focused on the implementation.
+
+Per-task scratch files (e.g. `TODO.md`, checklists, or notes) are not committed; use the issue thread to track your work instead.
 
 ## SDK API Changes
 
@@ -124,6 +162,20 @@ In short:
 
 - `app/` and `scripts/` must import the SDK via `@sharibo/client` (its published entry point), **never** a deep `packages/client/src/…` path.
 - `packages/client` must not import `app/` or `scripts/`.
-- `contracts/` and `circuits/` have no Jav
+- `contracts/` and `circuits/` have no JavaScript import dependencies on the rest of the monorepo.
 
-/* … truncated 1020 chars — edit only what you need near the top … */
+Running `npm run lint` will catch violations.
+
+## Setup trouble?
+
+Getting a fresh machine running and tripping on a toolchain issue (`circom`, `wasm32v1-none`, `stellar` vs `soroban`, friendbot limits, testnet resets, missing `circuits/build/`)? See [docs/troubleshooting.md](docs/troubleshooting.md) for symptom → cause → fix walkthroughs.
+
+## Pre-PR checklist
+
+Before opening a pull request, run the authoritative local verification gate:
+
+- Run `just ci` from anywhere inside the repository. This is the **same gate CI runs** — TypeScript SDK build, typecheck, `npm run lint`, `npm run lint:dead`, every unit suite (app, client, scripts, circuits checkers, repo-structure), `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test`, and `stellar contract build`.
+- `just verify` is a **fast pre-commit subset** only (typecheck + lint + client/app unit tests). It is not sufficient for a PR.
+- The gate intentionally excludes `e2e`, circuit trusted setup (`just circuits`), mutation, and benchmarks — those are slow and/or spend testnet friendbot funds. Run them on demand when your change touches those areas.
+
+If `just ci` passes locally, it's the single documented answer to "did I break anything?" and a good signal your change is ready for review.

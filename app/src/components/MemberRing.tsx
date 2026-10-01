@@ -6,9 +6,10 @@ import styles from "./MemberRing.module.css";
 // as "the one that claimed" — that's the point. From outside the ring, all
 // five remain equally plausible; only the demo operator (via the radio
 // picker below) ever knows which one actually did.
-//
-// Scaling is intrinsic via the SVG viewBox (see #305) — no resize listener
-// and no --ring-radius lookup are needed.
+import type { Member } from "../types.js";
+import { useI18n } from "../i18n.js";
+import styles from "./MemberRing.module.css";
+
 export function MemberRing({
   members,
   revealed,
@@ -87,7 +88,11 @@ export function MemberRing({
       </svg>
 
       {revealed && (
-        <p className={styles.ringCaption}>{t("ring.caption")}</p>
+        <p className={styles.ringCaption}>
+          Payout landed on the address above — cryptographically, it could be
+          tied to <em>any</em> of the 5 members in the ring. An outside
+          observer cannot tell which.
+        </p>
       )}
     </div>
   );
@@ -98,7 +103,7 @@ export function MemberRingSkeleton() {
   return (
     <div className={styles.ringWrap} aria-hidden="true">
       <div className={styles.ring}>
-        <div className={`skeleton ${styles.skeletonRingCenter}`} />
+        <div className={`${styles.skeleton} ${styles.skeletonRingCenter}`} />
         {Array.from({ length: 5 }, (_, i) => {
           const angle = (i / 5) * 2 * Math.PI - Math.PI / 2;
           const x = Math.round(Math.cos(angle) * radius);
@@ -106,7 +111,7 @@ export function MemberRingSkeleton() {
           return (
             <div
               key={i}
-              className={`skeleton ${styles.skeletonRingNode}`}
+              className={`${styles.skeleton} ${styles.skeletonRingNode}`}
               style={{ transform: `translate(${x}px, ${y}px)` }}
             />
           );
