@@ -50,6 +50,15 @@ We use a set of topic labels to categorize issues and pull requests. These label
 |-------|-------------|---------|
 | Stellar Wave | Issues in the Stellar wave program | Stellar Wave program tasks |
 
+## Dead code (knip)
+
+`knip.jsonc` states that **zero issues is the baseline**. A knip finding is resolved by **deleting the code or wiring it into the running app** — never by adding a reference that exists only to satisfy the checker.
+
+- Do not add barrel files (`index.ts`) whose stated purpose is to make knip see components as referenced. If nothing imports the barrel, knip reports the barrel *and* the components, so the workaround makes the report worse, not better.
+- Import components by path (`./components/Foo`) rather than through a barrel.
+- If a component is not rendered by the app, either adopt it into the render tree or delete it. Leaving it in place with a fake reference misleads anyone reading the directory to understand the UI.
+- Do not add `knip.jsonc` entries to silence a finding for the same reason.
+
 ## Review expectations
 
 This repo historically had **no CI**, so human review remains the primary gate — a merged PR is effectively the last check before the code lands. Contract line-coverage is now also enforced in GitHub Actions (`.github/workflows/coverage.yml`) against `coverage-thresholds.json`. `.github/CODEOWNERS` requests the owning reviewers automatically on every PR.

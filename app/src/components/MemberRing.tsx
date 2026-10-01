@@ -1,22 +1,6 @@
-import { useEffect, useState } from "react";
-
-// Reads --ring-radius from CSS custom properties so the ring scales with
-// responsive breakpoints without JS hard-coding.
-export function useRingRadius(): number {
-  const [radius, setRadius] = useState(100);
-
-  useEffect(() => {
-    const read = () => {
-      const value = getComputedStyle(document.documentElement).getPropertyValue("--ring-radius");
-      setRadius(parseFloat(value) || 100);
-    };
-    read();
-    window.addEventListener("resize", read);
-    return () => window.removeEventListener("resize", read);
-  }, []);
-
-  return radius;
-}
+import type { Member } from "../types.js";
+import { useI18n } from "../i18n.js";
+import styles from "./MemberRing.module.css";
 
 // Purely presentational: after a claim, none of the 5 nodes are highlighted
 // as "the one that claimed" — that's the point. From outside the ring, all
@@ -44,7 +28,7 @@ export function MemberRing({
         viewBox="0 0 340 340"
         width="100%"
         role="img"
-        aria-label="Member ring"
+        aria-label={revealed ? t("ring.label.revealed") : t("ring.label.loading")}
       >
         <circle
           cx={center}

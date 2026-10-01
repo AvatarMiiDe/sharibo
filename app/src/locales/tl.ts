@@ -1,3 +1,6 @@
+// TODO(i18n): machine-translated, needs native review
+// Tagalog (tl) locale. Machine-translated first pass; native review tracked separately.
+
 const tl = {
   "lang.label": "Wika",
   "lang.en": "Ingles",

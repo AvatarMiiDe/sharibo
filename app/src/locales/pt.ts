@@ -1,3 +1,4 @@
+// TODO(i18n): machine-translated, needs native review
 const pt = {
   "lang.label": "Idioma",
   "lang.en": "Inglês",

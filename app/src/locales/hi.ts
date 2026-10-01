@@ -1,3 +1,4 @@
+// TODO(i18n): machine-translated, needs native review
 const hi = {
   "lang.label": "भाषा",
   "lang.en": "अंग्रेज़ी",

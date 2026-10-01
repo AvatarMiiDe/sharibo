@@ -1,3 +1,4 @@
+// TODO(i18n): machine-translated, needs native review
 const fr = {
   "lang.label": "Langue",
   "lang.en": "Anglais",
