@@ -89,14 +89,14 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-// HTTP goes through the shared helper in scripts/http.ts (fetch + an explicit
-// abort deadline + keepalive: false), not a `curl` subprocess. `curl` was an
-// undeclared runtime dependency of this script and is gone; see #511.
-async function get(url: string): Promise<string> {
-  verbose("GET", url);
-  const body = await httpGet(url);
-  verbose("response length:", body.length, "bytes");
-  return body;
+// Historical: fetch hung when the script was backgrounded by certain tooling
+// (see docs/canary.md and NOTES.md Phase 4). These calls use curl today;
+// run e2e in the foreground per docs/canary.md when debugging hangs.
+async function curlGet(url: string): Promise<string> {
+  verbose("curl GET", url);
+  const { stdout } = await execFileAsync("curl", ["-s", "--max-time", "15", url]);
+  verbose("curl response length:", stdout.length, "bytes");
+  return stdout;
 }
 
 async function friendbotFund(publicKey: string): Promise<void> {
@@ -363,8 +363,6 @@ async function main() {
     "circuits",
     "build",
   );
-  const claimant = members[CLAIMANT_INDEX];
-  const merkleProof = tree.proofOf(claimant.identity.commitment);
   verbose("generating proof with wasm + zkey from", circuitsBuildDir);
   const { proof, nullifierHash, root: proofRoot, externalNullifier: proofExternalNullifier } =
     await timed("proof generation", () =>
@@ -435,17 +433,13 @@ async function main() {
   assert(claimedCircle.round === 1, "round should have advanced to 1");
   console.log("   payout confirmed: pot -> 0, round -> 1");
   
-  // Log the simulated claim fee alongside the confirmed payout.
-  if (feeEstimate) {
+  // Log fee estimate vs actual charged delta if available
+  if (claimResult.feeCharged) {
     console.log(
-      "   claim fee (simulated):",
-      feeEstimate.minResourceFee.toString(),
-      "stroops min resource /",
-      feeEstimate.totalFee.toString(),
-      "stroops total",
+      "   claim fee charged:",
+      claimResult.feeCharged.toString(),
+      "stroops",
     );
-  } else {
-    console.log("   claim fee (simulated): unavailable (simulation failed; claim still submitted)");
   }
 
   if (SKIP_REPLAY) {
@@ -493,7 +487,8 @@ async function main() {
       const message = (err as Error).message;
       secondClaimRejected = true;
       assert(
-        message.includes("Error(Contract, #4)"),
+        message.includes("Error(Contract, #4)",
+      ),
         `expected AlreadyClaimed (#4), got: ${message.split("\n")[0]}`,
       );
       console.log("   rejected as expected (AlreadyClaimed):", message.split("\n")[0]);

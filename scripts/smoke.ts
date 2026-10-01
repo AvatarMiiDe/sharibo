@@ -9,7 +9,7 @@
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { httpGetJson } from "./http.js";
+import fs from "node:fs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // SHARIBO_ENV_FILE lets the test suite point at a throwaway fixture instead of
@@ -141,6 +141,36 @@ async function checkCircle(): Promise<DiagResult> {
   }
 }
 
+async function checkEvidenceFreshness(): Promise<DiagResult> {
+  const name = "Evidence freshness";
+  try {
+    const deploymentsPath = path.join(__dirname, "..", "docs", "deployments.md");
+    if (!fs.existsSync(deploymentsPath)) {
+      return { name, ok: true, detail: "docs/deployments.md not found, skipping" };
+    }
+    const md = fs.readFileSync(deploymentsPath, "utf8");
+    const match = md.match(/\|\s*Current[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*`([a-f0-9]+)`\s*\|/i);
+    if (!match) {
+      return { name, ok: true, detail: "No current TX hash found in deployments.md" };
+    }
+    const txHash = match[1];
+    
+    const res = await fetch(`${HORIZON_URL}/transactions/${txHash}`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    
+    if (res.status === 404) {
+      return { name, ok: false, detail: `Transaction ${txHash} not found (testnet likely reset)` };
+    }
+    if (!res.ok) {
+      return { name, ok: false, detail: `HTTP ${res.status} from Horizon` };
+    }
+    return { name, ok: true, detail: `Transaction ${txHash} is retrievable` };
+  } catch (err) {
+    return { name, ok: false, detail: `Check failed: ${(err as Error).message}` };
+  }
+}
+
 // --- main ---
 
 async function main() {
@@ -150,6 +180,7 @@ async function main() {
     checkRpcHealth(),
     checkHorizon(),
     checkCircle(),
+    checkEvidenceFreshness(),
   ]);
 
   let allOk = true;

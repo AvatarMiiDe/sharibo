@@ -8,37 +8,35 @@ dependency update breaks proof encoding. Scheduling it nightly turns that
 into an early warning instead of a surprise the next time someone runs it
 by hand.
 
-## The foreground-run constraint — no longer applies
+## The foreground-run constraint (authoritative)
 
-`NOTES.md` records an investigation in which backgrounding `scripts/e2e.ts`
-(via an agent tool's own background-process wrapper) made its `curl`
-subprocess calls hang past their own `--max-time`, while foreground runs and
-isolated repros with identical code consistently succeeded. That produced the
-"run it in the foreground" rule this page used to lead with.
+**Run `npm run e2e` / `scripts/e2e.ts` in the foreground** when debugging or
+when validating a new canary schedule. Do not wrap the script in tooling that
+backgrounds the Node process in a way that leaves child HTTP clients stuck
+without progress — that failure mode was hit once during the original build
+(investigation recorded historically in [NOTES.md](../NOTES.md) Phase 4).
 
-**As of #511 that constraint has been removed at its root cause.** `e2e.ts`
-no longer spawns a `curl` subprocess for its friendbot and Horizon calls. All
-three scripts (`e2e.ts`, `smoke.ts`, `testnet-health.ts`) share
-`scripts/http.ts`, which uses `fetch` with an explicit `AbortController`
-deadline *and* `keepalive: false` — a hard timeout that a slow or half-open
-pooled socket cannot outlive, and no child process to inherit a tty
-dependency from. The nightly canary can therefore be backgrounded, and every
-recipe below already does exactly that.
+What we know from that investigation:
 
-Two caveats, both worth stating plainly:
+- Backgrounding via **one particular agent tool's process wrapper** caused
+  friendbot/Horizon HTTP calls to hang past their timeouts, while identical
+  **foreground** runs succeeded.
+- That is **not** the same as "no controlling terminal." A fully detached
+  `curl` (nohup, stdin from `/dev/null`, disowned) completed normally in the
+  same environment — cron, `launchd`, and systemd timers typically match
+  that detached pattern, not the problematic wrapper.
 
-- The hang was never reproduced in the first place (#94 re-ran it clean on
-  Node 20/22/24), so this is the removal of a workaround, not a fix for an
-  understood failure. `scripts/fetch-migration.live.test.ts` (`npm run test:live
-  --workspace=scripts`) is the standing regression guard: if the undici hang
-  ever returns, it will fail there.
-- **Verify on your own machine before trusting a nightly schedule.** Run the
-  recipe manually once (`launchctl start` / `run-parts` equivalent /
-  `systemctl start --wait`) and confirm the log looks like a normal run. If
-  your run *does* hang under the scheduler, do not add a timeout that
-  silently backgrounds the script further — instead compare against a plain
-  foreground `npm run e2e` and report the difference; something about your
-  scheduler's process environment differs from both cases above.
+**Still: verify on your own machine before trusting a nightly schedule.**
+Run the recipe manually once (`launchctl start` / `run-parts` equivalent /
+`systemctl start --wait`) and confirm the log looks like a normal run, not
+a hang. If your run *does* hang under the scheduler, do not add a timeout
+that silently backgrounds the script further — instead compare against a
+plain foreground `npm run e2e` and report the difference; something about
+your scheduler's process environment differs from both cases above.
+
+For HTTP client choice in `e2e.ts` (native `fetch` vs `curl`), see the
+historical note in NOTES.md Phase 4; the canary constraint is about **process
+backgrounding**, not which HTTP API the script uses.
 
 ## macOS: `launchd`
 
