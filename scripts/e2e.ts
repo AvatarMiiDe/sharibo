@@ -91,10 +91,9 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-// Node's own fetch()/undici hung indefinitely against these two endpoints in
-// this environment even with AbortSignal.timeout set, while plain `curl`
-// consistently worked in seconds (see NOTES.md) — so these two HTTP calls
-// specifically shell out to curl rather than use fetch.
+// Historical: fetch hung when the script was backgrounded by certain tooling
+// (see docs/canary.md and NOTES.md Phase 4). These calls use curl today;
+// run e2e in the foreground per docs/canary.md when debugging hangs.
 async function curlGet(url: string): Promise<string> {
   verbose("curl GET", url);
   const { stdout } = await execFileAsync("curl", ["-s", "--max-time", "15", url]);
@@ -364,8 +363,6 @@ async function main() {
     "circuits",
     "build",
   );
-  const claimant = members[CLAIMANT_INDEX];
-  const merkleProof = tree.proofOf(claimant.identity.commitment);
   verbose("generating proof with wasm + zkey from", circuitsBuildDir);
   const { proof, nullifierHash, root: proofRoot, externalNullifier: proofExternalNullifier } =
     await timed("proof generation", () =>
@@ -428,9 +425,12 @@ async function main() {
   console.log("   payout confirmed: pot -> 0, round -> 1");
   
   // Log fee estimate vs actual charged delta if available
-  if (feeCharged) {
-    const feeChargedNum = typeof feeCharged === "string" ? BigInt(feeCharged) : feeCharged;
-    console.log("   claim fee charged:", feeChargedNum.toString(), "stroops");
+  if (claimResult.feeCharged) {
+    console.log(
+      "   claim fee charged:",
+      claimResult.feeCharged.toString(),
+      "stroops",
+    );
   }
 
   if (SKIP_REPLAY) {
@@ -478,7 +478,8 @@ async function main() {
       const message = (err as Error).message;
       secondClaimRejected = true;
       assert(
-        message.includes("Error(Contract, #4)"),
+        message.includes("Error(Contract, #4)",
+      ),
         `expected AlreadyClaimed (#4), got: ${message.split("\n")[0]}`,
       );
       console.log("   rejected as expected (AlreadyClaimed):", message.split("\n")[0]);

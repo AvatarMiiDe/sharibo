@@ -19,12 +19,12 @@ import { Buffer } from "buffer";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { configureArtifacts } from "@sharibo/client";
+import { startArtifactPrefetch } from "@sharibo/client";
 import App from "./App.js";
 import { ErrorBoundary } from "./ErrorBoundary.js";
 import { getCapabilityReport } from "./lib/capabilities.js";
 import { I18nProvider, useI18n } from "./i18n.js";
-import "./style.css";
+import "./tokens.css";
 
 function UnsupportedBrowserScreen() {
   const { t } = useI18n();
@@ -61,6 +61,11 @@ function UnsupportedBrowserScreen() {
 }
 
 const capabilityReport = getCapabilityReport();
+startArtifactPrefetch().catch(() => {
+  // The app renders the background progress indicator and handles failures
+  // through subscription updates; ignore promise rejections here so the page
+  // can keep loading even if the prefetch is interrupted.
+});
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
