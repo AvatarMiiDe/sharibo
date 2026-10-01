@@ -48,19 +48,20 @@ A **rotating savings and credit association** (ROSCA) is one of the oldest finan
 
 ## On-chain evidence (testnet — verify any of it yourself)
 
-Every claim below was produced by running this repo against live Stellar testnet infrastructure (recorded July 2026). Nothing is asserted from a test double.
+Every claim below was produced by running this repo against live Stellar testnet infrastructure. Nothing is asserted from a test double.
 
 > [!NOTE]
-> **Testnet resets:** Stellar testnet is reset quarterly, which wipes all deployed contracts and transaction history. The transaction hashes and contract ID below reflect the testnet deployment at the time of recording. If testnet has been reset since, follow the [testnet reset runbook](docs/troubleshooting.md#stellar-testnet-resets-quarterly) to redeploy or re-run `npm run e2e` to verify fresh on-chain transactions.
-
-| What                                     | Where                                                                                                        |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Sharibo contract                         | `CB64IZIBBSPUY63UMIVACKWDKRFNH6WJ2EPAOLM7QR4ZI6IJOT4N2LCF`                                                   |
-| Test token (native XLM SAC)              | `CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC`                                                   |
-| `create_circle` (circle 0)               | tx `fa76e7fe7439199796db55fdde4bcaaad2cb6a98c0f29214d00605f40ca8fdb0`                                        |
-| **Real Groth16 proof accepted on-chain** | tx `2258397474e3ad420d6dd8310cb0976d270c29ec4a4ec2b60a9ae58408088087` — `successful: true`, ledger `3379702` |
-| Tampered proof **rejected**              | `Error(Contract, #5)` `InvalidProof` — the pairing check genuinely fails                                     |
-| Nullifier replay **rejected**            | `Error(Contract, #4)` `AlreadyClaimed` — reproduced every run by `npm run e2e`                               |
+> **Testnet resets:** Stellar testnet is reset quarterly, which wipes all deployed contracts and transaction history.
+>
+> All contract IDs, schema versions, verification key hashes, and transaction evidence are tracked in the **[Deployments Table](docs/deployments.md)**.
+>
+> If testnet has been reset and the evidence in the table has gone stale, you can always generate fresh, zero-dependency on-chain evidence by running the end-to-end suite:
+>
+> ```bash
+> npm run e2e
+> ```
+>
+> This script exercises the entire 4-signal circuit and smart contract on testnet, proving that the flow works *right now*, regardless of historical resets.
 
 ## Verify it yourself in 60 seconds
 
@@ -68,21 +69,25 @@ No toolchain needed — just `curl`.
 
 **1. The accepted proof is a real, successful testnet transaction:**
 
+Grab the latest proof transaction hash from the **[Deployments Table](docs/deployments.md)** and run:
+
 ```bash
-curl -s https://horizon-testnet.stellar.org/transactions/2258397474e3ad420d6dd8310cb0976d270c29ec4a4ec2b60a9ae58408088087 | grep -E '"successful"|"ledger"'
-# → "successful": true,   "ledger": 3379702
+curl -s https://horizon-testnet.stellar.org/transactions/<TX_HASH> | grep -E '"successful"|"ledger"'
+# → "successful": true,   "ledger": ...
 ```
 
 **2. The contract is live and holds real circle state** (requires [`stellar` CLI](https://developers.stellar.org/docs/tools/cli)):
 
+Grab the latest Contract ID from the **[Deployments Table](docs/deployments.md)** and run:
+
 ```bash
 stellar contract invoke \
-  --id CB64IZIBBSPUY63UMIVACKWDKRFNH6WJ2EPAOLM7QR4ZI6IJOT4N2LCF \
+  --id <CONTRACT_ID> \
   --network testnet -- get_circle --circle_id 0
 # → Circle { root, contribution, size: 5, round: ≥1, ... } — round ≥ 1 means a real claim has already succeeded
 ```
 
-**3. Or view it in the explorer:** [contract on stellar.expert](https://stellar.expert/explorer/testnet/contract/CB64IZIBBSPUY63UMIVACKWDKRFNH6WJ2EPAOLM7QR4ZI6IJOT4N2LCF) — five deposits in, one payout out, to an address that appears nowhere else in the circle.
+**3. Or view it in the explorer:** [contract on stellar.expert](https://stellar.expert/explorer/testnet/contract/<CONTRACT_ID>) — five deposits in, one payout out, to an address that appears nowhere else in the circle.
 
 To reproduce everything from source (circuit build → trusted setup → tests → full e2e round), see [Run it](#run-it).
 
@@ -342,18 +347,23 @@ To change the depth:
 
 ```
 sharibo/
+├── app/                 React + Vite browser demo
 ├── circuits/            membership.template.circom (source) + config.json, compile/setup/prove scripts, circuit tests, verification_key.json
 ├── contracts/sharibo/   the Soroban contract (lib.rs) + its test suite (test.rs)
-├── packages/core/       shared crypto primitives (Poseidon, Merkle, identity)
-├── packages/client/     isomorphic TS SDK: identity.ts, tree.ts, prove.ts, contract.ts, config.ts
-├── test-vectors/        cross-implementation Poseidon fixtures shared by the client and circuit test suites
-├── scripts/             e2e/smoke helpers + maintenance checkers (secrets, SDK pin, clean)
-├── app/                 React + Vite browser demo
 ├── docs/                long-form docs, ADRs, and docs/hackathon/ (point-in-time archive)
+├── judges/              historic hackathon entry point
+├── packages/client/     isomorphic TS SDK: identity.ts, tree.ts, prove.ts, contract.ts, config.ts
+├── packages/core/       shared crypto primitives (Poseidon, Merkle, identity)
+├── scripts/             e2e/smoke helpers
+├── scripts/maintenance/ checkers (secrets, SDK pin, clean)
+├── test-vectors/        cross-implementation Poseidon fixtures shared by the client and circuit test suites
+├── __mocks__/           vitest mock files for app tests
 ├── README.md            this file
 ├── NOTES.md             historical append-only build log (not the authority for current invariants)
 ├── full_product_breakdown.md  every facet of the system, in detail
-└── docs/hackathon/hackathon_demo_script.md   demo video script (motion + voiceover)
+├── docs/hackathon/hackathon_demo_script.md   demo video script (motion + voiceover)
+├── justfile             command runner configurations
+└── knip.jsonc           dependency and dead code linting configuration
 ```
 
 Full annotated version (what each file does and why): [breakdown §16](full_product_breakdown.md#16-repository-structure). See also [docs/index.md](docs/index.md) for a complete documentation index and the contributor-friendly [architecture guide](docs/architecture.md).
