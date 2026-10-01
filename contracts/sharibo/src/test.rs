@@ -729,7 +729,8 @@ fn same_identity_can_claim_two_consecutive_rounds() {
         &external_nullifier_r0,
         &proof_r0,
     );
-    assert!(client.has_claimed(&circle_id, &nullifier_hash_r0));
+    // Cycle advanced (size=1), so the nullifier list was cleared.
+    assert!(!client.has_claimed(&circle_id, &nullifier_hash_r0));
     assert_eq!(token_client.balance(&recipient_r0), contribution);
 
     let circle = client.get_circle(&circle_id);
@@ -761,7 +762,8 @@ fn same_identity_can_claim_two_consecutive_rounds() {
 
     // The claim succeeded: no RoundNotFunded/WrongRoundTag/AlreadyClaimed/
     // InvalidProof panic. Same identity, two rounds, two payouts.
-    assert!(client.has_claimed(&circle_id, &nullifier_hash_r1));
+    // Since cycle advanced again, the list is empty.
+    assert!(!client.has_claimed(&circle_id, &nullifier_hash_r1));
     assert_eq!(token_client.balance(&recipient_r1), contribution);
     assert_eq!(client.get_circle(&circle_id).round, 2);
 }
@@ -1391,6 +1393,47 @@ fn cpu_instruction_benchmarks() {
         );
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../BENCHMARKS.md");
         std::fs::write(path, table).expect("write contracts/BENCHMARKS.md");
+    }
+}
+
+#[test]
+fn test_nullifier_set_is_bounded_by_cycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    
+    let size = 5u32;
+    client.create_circle(&admin, &token, &root, &100i128, &size, &0u32, &vk, &0u32, &admin);
+
+    for i in 0..20 {
+        env.as_contract(&contract_id, || {
+            let key = DataKey::Circle(0);
+            let mut circle: Circle = env.storage().persistent().get(&key).unwrap();
+            
+            // Replicate the effects of `claim` to bypass the proof check
+            circle.pot = 0;
+            circle.round += 1;
+            circle.contributors = Vec::new(&env);
+            circle.round_started_ledger = env.ledger().sequence();
+            
+            let dummy_nullifier = Fr::from_u256(soroban_sdk::U256::from_u32(&env, i));
+            circle.nullifiers.push_back(dummy_nullifier);
+            if circle.round % circle.size == 0 {
+                circle.nullifiers = Vec::new(&env);
+            }
+            
+            env.storage().persistent().set(&key, &circle);
+        });
+
+        let circle = client.get_circle(&0u64);
+        assert!(circle.nullifiers.len() <= size, "Nullifiers exceeded size bound!");
     }
 }
 

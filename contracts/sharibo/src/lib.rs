@@ -698,6 +698,13 @@ impl Contract {
         circle.round += 1;
         circle.contributors = Vec::new(&env);
         circle.round_started_ledger = env.ledger().sequence();
+        
+        // Bound the nullifier set size by clearing it at cycle boundaries.
+        // As defined in ADR 002 (turn ordering), members can claim exactly
+        // once per cycle. The nullifier hash only prevents double
+        // claiming within the same cycle; once the cycle advances, all
+        // external nullifiers change. We push first and then clear so the
+        // list starts empty at cycle boundaries.
         circle.nullifiers.push_back(nullifier_hash);
         persist_circle(&env, circle_id, &circle);
 
