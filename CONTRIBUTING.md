@@ -170,6 +170,56 @@ Running `npm run lint` will catch violations.
 
 Getting a fresh machine running and tripping on a toolchain issue (`circom`, `wasm32v1-none`, `stellar` vs `soroban`, friendbot limits, testnet resets, missing `circuits/build/`)? See [docs/troubleshooting.md](docs/troubleshooting.md) for symptom → cause → fix walkthroughs.
 
+## Tests must be hermetic
+
+**The default test command must pass with networking disabled.**
+
+`npm test` (and `just test`, `just scripts-test`) contacts no host, spends no
+friendbot quota, and must not fail because a third-party service is down, a
+proxy rejected you, or you are on a plane. A unit suite that reaches the network
+cannot be a gate, and a suite that is red for environmental reasons trains
+contributors to ignore red.
+
+Concretely, for `scripts/`:
+
+| | |
+|---|---|
+| **Default** — `npm test --workspace=scripts` | Hermetic. Glob is `*.test.ts`. Stub `fetch`, or point at a local `http.createServer`. |
+| **Live** — `npm run test:live --workspace=scripts` (`just scripts-test-live`) | Opt-in. May reach friendbot / Horizon / testnet. Naming convention: `*.live.ts`. |
+| **Probe** — `npm run smoke` | The live read-only deployment health check. Not part of any suite. |
+
+Rules of thumb:
+
+- **Never call a public host from a `*.test.ts`.** If you need a slow response, a
+  4xx, or a 500, serve it from a local `http.createServer` — hermetic and faster.
+  `httpbin.org` is explicitly not acceptable: a public demo service with no
+  availability guarantee.
+- **Never call friendbot from a test suite.** `just test` deliberately keeps
+  e2e out of the default path because it needs live funds and friendbot quota.
+  A test that calls friendbot bypasses that on purpose.
+- **A URL in a fixture is not a request**, but prefer a reserved TLD
+  (`https://rpc.invalid`, `https://example.test`) over a real hostname anyway,
+  so nobody later adds a call against a value that was only ever meant to be a
+  string. RFC 2606 reserves `.invalid`, `.test` and `.example`; they can never
+  resolve.
+- **Do not mutate the developer's `.env`.** Point the script at a throwaway
+  fixture with `SHARIBO_ENV_FILE`, or hand the child process an explicit
+  environment. `node --test` runs files in parallel, so two test files writing
+  the same shared file race.
+
+These rules are enforced, not just documented: `scripts/hermeticity.test.ts`
+fails the default suite if any file in the default glob names a host outside the
+allowlist, or if the two globs stop being disjoint.
+
+> **Why live tests are named `*.live.ts` and not `*.live.test.ts`:** Node's
+> `--test` glob has no exclusion syntax. Passing `"!*.live.test.ts"` is
+> silently ignored, and a `*.test.ts` glob matches `*.live.test.ts` anyway — so
+> a live test named that way runs in the default suite and burns friendbot
+> quota on every `npm test`. A `.live.ts` suffix cannot be matched by a
+> `*.test.ts` glob, which is the only thing that reliably separates the two
+> lanes. `hermeticity.test.ts` asserts the invariant, so the naming cannot be
+> "tidied up" back into a silent regression.
+
 ## Pre-PR checklist
 
 Before opening a pull request, run the authoritative local verification gate:

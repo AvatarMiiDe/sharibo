@@ -85,7 +85,8 @@ client:
 
 # ── Scripts ───────────────────────────────────────────────────────────────────
 
-# Run the scripts workspace unit tests (node --test)
+# Run the scripts workspace unit tests (node --test).
+# Hermetic: passes with networking disabled.
 scripts-test:
     npm test --workspace=scripts
 

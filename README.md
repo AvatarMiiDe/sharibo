@@ -304,7 +304,7 @@ A fast, read-only probe that verifies your deployment is healthy: hits the Sorob
 npm run e2e                                    # full run (default)
 npm run e2e -- --skip-replay                   # stop after the successful claim
 npm run e2e -- --reuse-circle 0                # skip circle creation, run against existing circle 0
-npm run e2e -- --verbose                       # echo each RPC/curl interaction
+npm run e2e -- --verbose                       # echo each RPC/HTTP interaction
 npm run e2e -- --skip-replay --verbose         # combine flags freely
 ```
 
@@ -316,7 +316,7 @@ Runs a full round against testnet for real: creates a 5-member circle, funds it 
 |---|---|
 | `--skip-replay` | Stop after the successful claim (skip round 2 funding + replay check) |
 | `--reuse-circle <id>` | Skip circle creation; run against an existing circle |
-| `--verbose` | Echo each RPC/curl interaction for debugging |
+| `--verbose` | Echo each RPC/HTTP interaction for debugging |
 
 > This script shells out to `curl` for friendbot/Horizon calls rather than using `fetch()` — see `NOTES.md` if you're curious why. Run `npm run e2e` in the foreground when debugging hangs — see [docs/canary.md](docs/canary.md).
 
