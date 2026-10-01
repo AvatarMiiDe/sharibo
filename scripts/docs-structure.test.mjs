@@ -84,3 +84,45 @@ describe("documentation structure", () => {
     assert.equal(MANIFEST.order[3], "recipientHash");
   });
 });
+
+describe("workspace structure", () => {
+  it("every workspace tsconfig.json extends the base", () => {
+    const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+    const offenders = [];
+    for (const ws of pkg.workspaces) {
+      const tsconfigPath = join(ROOT, ws, "tsconfig.json");
+      let tsconfig;
+      try {
+        tsconfig = readFileSync(tsconfigPath, "utf8");
+      } catch (e) {
+        if (e.code === "ENOENT") continue;
+        throw e;
+      }
+      if (!/"extends"\s*:\s*".*tsconfig\.base\.json"/.test(tsconfig)) {
+        offenders.push(ws);
+      }
+    }
+    assert.deepEqual(offenders, [], `Workspaces not extending base tsconfig: ${offenders.join(", ")}`);
+  });
+
+  it("README Repository structure lists every top-level directory", () => {
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+    const structMatch = /## Repository structure\n\n```[\s\S]*?\nsharibo\/\n([\s\S]*?)\n```/.exec(readme);
+    assert.ok(structMatch, "Could not find Repository structure block in README.md");
+    const structBlock = structMatch[1];
+
+    const missing = [];
+    for (const name of readdirSync(ROOT)) {
+      if (name.startsWith(".") || name === "node_modules" || name === "dist" || name === "target") continue;
+      
+      const st = statSync(join(ROOT, name));
+      if (st.isDirectory()) {
+        if (!structBlock.includes(` ${name}/`)) {
+          missing.push(`${name}/`);
+        }
+      }
+    }
+    
+    assert.deepEqual(missing, [], `Missing top-level directories in README structure: ${missing.join(", ")}`);
+  });
+});

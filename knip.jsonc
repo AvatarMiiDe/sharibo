@@ -29,6 +29,10 @@
   // entry points for each workspace.
 
   "workspaces": {
+    "root": {
+      "entry": ["__mocks__/**/*.ts"],
+      "project": ["__mocks__/**/*.ts"]
+    },
     // ── app workspace ───────────────────────────────────────────────────────
     "app": {
       "entry": [

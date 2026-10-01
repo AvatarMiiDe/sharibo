@@ -23,6 +23,12 @@ We use a set of topic labels to categorize issues and pull requests. These label
 | refactor | Code structure improvements | Codebase-wide |
 | performance | Speed & resource usage | Performance-critical code |
 | roadmap | Larger feature from the roadmap | Planned features |
+| architecture | Structural / design decisions | Architecture proposals, ADRs |
+| tech-debt | Known shortcuts to pay down | Deferred cleanups |
+| observability | Logging, metrics, tracing | Observability code |
+| i18n | Internationalization | User-facing strings |
+| harden | Robustness hardening | Input validation, error paths |
+| api | Public API surface | SDK exports, contract entrypoints |
 
 ### GitHub Default Labels
 
@@ -44,6 +50,15 @@ We use a set of topic labels to categorize issues and pull requests. These label
 |-------|-------------|---------|
 | Stellar Wave | Issues in the Stellar wave program | Stellar Wave program tasks |
 
+## Dead code (knip)
+
+`knip.jsonc` states that **zero issues is the baseline**. A knip finding is resolved by **deleting the code or wiring it into the running app** — never by adding a reference that exists only to satisfy the checker.
+
+- Do not add barrel files (`index.ts`) whose stated purpose is to make knip see components as referenced. If nothing imports the barrel, knip reports the barrel *and* the components, so the workaround makes the report worse, not better.
+- Import components by path (`./components/Foo`) rather than through a barrel.
+- If a component is not rendered by the app, either adopt it into the render tree or delete it. Leaving it in place with a fake reference misleads anyone reading the directory to understand the UI.
+- Do not add `knip.jsonc` entries to silence a finding for the same reason.
+
 ## Review expectations
 
 This repo historically had **no CI**, so human review remains the primary gate — a merged PR is effectively the last check before the code lands. Contract line-coverage is now also enforced in GitHub Actions (`.github/workflows/coverage.yml`) against `coverage-thresholds.json`. `.github/CODEOWNERS` requests the owning reviewers automatically on every PR.
@@ -52,6 +67,36 @@ This repo historically had **no CI**, so human review remains the primary gate �
 - **Security-critical paths require a domain reviewer.** `circuits/**` and `contracts/**` changes must be reviewed by someone who reads circom / Rust respectively, not just by whoever happens to be around.
 - **The wire-format boundary needs review on all three sides.** Any PR touching circuit public signals (`circuits/`), contract `public_inputs` (`contracts/`), or SDK encoding (`packages/client/`) must be reviewed on all three sides. The public signal order `[nullifierHash, root, externalNullifier, recipientHash]` and the BLS12-381 field encoding are load-bearing invariants that only hold if circuit, contract, and client agree — see [docs/wire-format.md](docs/wire-format.md).
 
+## Accessibility
+
+**The bar for this repo is WCAG 2.1 Level AA**, and it is enforced, not
+aspirational. `app/src/a11y.test.tsx` runs axe-core against every screen and
+asserts zero violations; `app/src/a11y.styles.test.ts` checks the colour
+tokens and the `prefers-reduced-motion` / `prefers-color-scheme` media
+queries in `app/src/style.css`. Both run in the **App** GitHub Actions
+workflow. Treat an a11y regression the same way you would a failing test.
+
+Two things to know before you touch the UI:
+
+- **Contrast is checked at the token level, not by axe.** jsdom implements
+  almost none of the CSS cascade, so axe's `color-contrast` rule reports
+  nothing useful in a unit test. `a11y.styles.test.ts` parses `style.css` and
+  computes the WCAG ratios directly, which is why adding a new text colour
+  means adding it to the `PAIRS` list in that file too.
+- **Some contrast failures are known and pinned.** Writing the guard surfaced
+  real AA shortfalls, mostly in the dark theme, where the
+  `prefers-color-scheme: dark` block overrides `--ink`/`--bg`/`--card` but not
+  the light-only `--surface-*` and `--text-*` tokens. Each is listed in
+  `KNOWN_SHORTFALLS` and pinned with `it.fails`, so the suite stays green
+  while the defect stays visible. **Fixing one of those colours makes its
+  `it.fails` go red** — that is the signal to delete the entry, not a bug in
+  the guard. Do not add a new entry to silence a failing test.
+
+The audience is ROSCA participants worldwide, including on low-end devices and
+screen readers, so keyboard reachability, visible focus, and the polite live
+region are load-bearing. A change that makes the UI quieter for sighted users
+is a regression even when it looks like a cleanup.
+
 ## Filing an issue
 
 Use the templates in `.github/ISSUE_TEMPLATE/`: **Bug Report** for defects, **Feature Request** for new capabilities, and **Refactor / Architecture Proposal** for restructuring work — when there is no bug and no new feature, but there is a current shape, a proposed shape, a blast radius, and a migration path (e.g. moving code between packages, changing the contract's storage layout, changing the circuit's public signals). The refactor template requires the "where" (current state with file paths) and a behaviour-preservation plan, because those are the two things a refactor issue most often leaves out.
@@ -59,6 +104,8 @@ Use the templates in `.github/ISSUE_TEMPLATE/`: **Bug Report** for defects, **Fe
 ## Picking an Issue
 
 When looking for issues to work on, start by filtering by the `good first issue` label. These issues are specifically marked as suitable for newcomers and provide a great way to get familiar with the codebase. Before you start working on an issue, leave a comment to claim it and let the maintainers know you're working on it. If you have questions about the issue or need clarification, ask them directly on the issue rather than in a pull request—this helps keep the PR focused on the implementation.
+
+Per-task scratch files (e.g. `TODO.md`, checklists, or notes) are not committed; use the issue thread to track your work instead.
 
 ## SDK API Changes
 
@@ -125,9 +172,10 @@ Getting a fresh machine running and tripping on a toolchain issue (`circom`, `wa
 
 ## Pre-PR checklist
 
-Before opening a pull request, run the comprehensive local verification gate:
+Before opening a pull request, run the authoritative local verification gate:
 
-- Run `just verify` from anywhere inside the repository. It runs TypeScript typechecking (client and app), ESLint, a best-effort dead-code check (`ts-prune`), all unit tests (app and SDK), `cargo test`, and `cargo clippy -- -D warnings`.
-- The recipe intentionally excludes `e2e` and the circuits *trusted setup* because those are slow and/or spend testnet friendbot funds.
+- Run `just ci` from anywhere inside the repository. This is the **same gate CI runs** — TypeScript SDK build, typecheck, `npm run lint`, `npm run lint:dead`, every unit suite (app, client, scripts, circuits checkers, repo-structure), `cargo fmt --check`, `cargo clippy --all-targets -D warnings`, `cargo test`, and `stellar contract build`.
+- `just verify` is a **fast pre-commit subset** only (typecheck + lint + client/app unit tests). It is not sufficient for a PR.
+- The gate intentionally excludes `e2e`, circuit trusted setup (`just circuits`), mutation, and benchmarks — those are slow and/or spend testnet friendbot funds. Run them on demand when your change touches those areas.
 
-If `just verify` passes locally, it's the single documented answer to "did I break anything?" and a good signal your change is ready for review.
+If `just ci` passes locally, it's the single documented answer to "did I break anything?" and a good signal your change is ready for review.

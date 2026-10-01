@@ -83,7 +83,12 @@ export interface DebugBundle {
  * - Stellar secret seeds: start with 'S', 56 base-32 chars.
  * - Identity scalars: 77-digit decimal bigints (field elements).
  */
-export { REDACT_PATTERNS } from "../../../scripts/maintenance/secret-patterns.mjs";
+// Imported, not just re-exported: `export { X } from "..."` does not create a
+// local binding, so findLeakedSecret below would have referenced an undefined
+// REDACT_PATTERNS and thrown on every call.
+import { REDACT_PATTERNS } from "../../../scripts/maintenance/secret-patterns.mjs";
+
+export { REDACT_PATTERNS };
 
 /**
  * Scan a serialised bundle string for patterns that indicate a secret leaked.

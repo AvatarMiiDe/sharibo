@@ -398,6 +398,28 @@
   font-size: 13px;
 }
 
+.contributionField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+  width: min(100%, 280px);
+  margin: 0 auto 12px;
+  text-align: left;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+}
+
+.contributionField input {
+  min-height: var(--touch-min, 44px);
+  padding: 8px 12px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: var(--surface, #111);
+  color: inherit;
+  font: inherit;
+}
+
 .h1-small {
   font-size: 28px;
   margin: 0;
