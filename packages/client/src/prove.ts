@@ -74,6 +74,10 @@ export interface GenerateProofResult {
   provingTimeMs: number;
 }
 
+// G1/G2 encoding, public signal order, and vk.ic length rules are
+// specified in docs/wire-format.md — that document is the single source
+// of truth; do not describe the wire format here.
+
 export interface ProofResult {
   proof: unknown;
   publicSignals: string[];
@@ -336,6 +340,12 @@ export async function generateProof(
   const { signal, onEvent } = options ?? {};
   signal?.throwIfAborted();
   onEvent?.({ type: "proof:started" });
+  // Reject out-of-range / malformed circuit inputs BEFORE the un-interruptible
+  // WASM proving phase. The circuit itself has no range check on
+  // pathElements — the wasm witness generator wraps non-canonical values mod
+  // FR_MODULUS on assignment (issue #269) — so this is the defense that keeps
+  // a non-canonical encoding from ever reaching the prover.
+  validateCircuitInput(input);
   // Serialise bigints to strings for snarkjs
   const snarkInput: Record<string, unknown> = {
     identityNullifier: input.identityNullifier.toString(),
@@ -407,6 +417,10 @@ export async function verifyProofLocally(
   snarkjsProof: unknown,
 ): Promise<number> {
   const startedAt = perf.now();
+  for (let i = 0; i < publicSignals.length; i++) {
+    const sig = BigInt(publicSignals[i]);
+    assertInField(sig, `publicSignals[${i}]`);
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const valid = await (groth16 as any).verify(vkJson, publicSignals, snarkjsProof);
   const verifyTimeMs = Math.max(0, perf.now() - startedAt);

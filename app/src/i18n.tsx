@@ -6,7 +6,7 @@ type LocaleModule = {
   default: Dictionary;
 };
 
-const localeModules = import.meta.glob<LocaleModule>("./locales/*.ts", { eager: true });
+const localeModules = import.meta.glob<LocaleModule>("./locales/!(*.test).ts", { eager: true });
 
 function loadDictionaries(): Record<string, Dictionary> {
   const out: Record<string, Dictionary> = {};
@@ -31,7 +31,7 @@ interface I18nContextValue {
   t: (key: string, vars?: Record<string, string | number>) => string;
 }
 
-export const I18nContext = createContext<I18nContextValue | null>(null);
+const I18nContext = createContext<I18nContextValue | null>(null);
 
 function chooseInitialLocale(): LocaleCode {
   try {
@@ -142,7 +142,7 @@ export function useI18n(): I18nContextValue {
 export function LanguageSwitcher({ className }: { className?: string }) {
   const { locale, locales, setLocale, t } = useI18n();
   return (
-    <label className={className}>
+    <label className={`language-switcher ${className ?? ""}`}>
       <span className="sr-only">{t("lang.label")}</span>
       <select
         aria-label={t("lang.label")}

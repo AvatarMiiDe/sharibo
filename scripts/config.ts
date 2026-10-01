@@ -2,7 +2,6 @@ import { NETWORKS } from "@sharibo/client";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { NETWORKS } from "@sharibo/client";
 
 /**
  * Exported typed configuration loaded from the repo-root .env file.

@@ -363,8 +363,6 @@ async function main() {
     "circuits",
     "build",
   );
-  const claimant = members[CLAIMANT_INDEX];
-  const merkleProof = tree.proofOf(claimant.identity.commitment);
   verbose("generating proof with wasm + zkey from", circuitsBuildDir);
   const { proof, nullifierHash, root: proofRoot, externalNullifier: proofExternalNullifier } =
     await timed("proof generation", () =>
@@ -480,7 +478,8 @@ async function main() {
       const message = (err as Error).message;
       secondClaimRejected = true;
       assert(
-        message.includes("Error(Contract, #4)"),
+        message.includes("Error(Contract, #4)",
+      ),
         `expected AlreadyClaimed (#4), got: ${message.split("\n")[0]}`,
       );
       console.log("   rejected as expected (AlreadyClaimed):", message.split("\n")[0]);

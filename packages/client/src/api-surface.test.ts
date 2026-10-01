@@ -40,7 +40,7 @@ test("API surface snapshot matches committed snapshot", () => {
       constants[name] = typeOf;
     } else if (name in snapshotJson.errors) {
       errors[name] = "class";
-    } else if (name === "MerkleTree") {
+    } else if (name === "MerkleTree" || name === "SdkEventEmitter" || name === "ShariboSDK") {
       types[name] = "class";
     } else if (typeOf === "function") {
       functions[name] = typeOf;
