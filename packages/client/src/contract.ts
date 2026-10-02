@@ -6,8 +6,11 @@ import type { ContractProof, ContractVerificationKey } from "./prove.js";
 import { ContractError, RpcError, InvalidInputError } from "./errors.js";
 import { decodeContractError } from "./decodeError.js";
 import { withRetry, DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
-import { validateContractProof, validateContractVerificationKey } from "./validate.js";
+import { validateContractProof, validateContractVerificationKey, assertInField } from "./validate.js";
 import { SdkEventEmitter, type OnEventFn } from "./events.js";
+
+// Public signal order and claim argument order are specified in
+// docs/wire-format.md §1 — that document is the single source of truth.
 
 /**
  * Configuration required to connect to the Sharibo contract.
@@ -61,26 +64,11 @@ export interface ResolvedSigner {
   signAuthEntry: any;
 }
 
-export interface ResolvedSigner {
-  publicKey: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  signTransaction: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  signAuthEntry: any;
-}
-
 /**
  * Turns a keypair or a wallet signer into the pieces the contract client
  * needs, without constructing the client. Shared by `connect` and the SDK
  * facade so both agree on who the signer is.
  */
-export interface FeeEstimate {
-  /** Minimum resource fee in stroops, as reported by simulation. */
-  minResourceFee: bigint;
-  /** Total fee (base + resource) encoded in the assembled transaction, in stroops. */
-  totalFee: bigint;
-}
-
 export function resolveSigner(
   keypairOrSigner: Keypair | ShariboSigner,
   networkPassphrase: string,
@@ -103,39 +91,28 @@ export function resolveSigner(
 const CONTRACT_CLIENT_CACHE_LIMIT = 16;
 const contractClientCache = new Map<string, Promise<ShariboClient>>();
 
-async function getCachedContractClient(
-  cacheKey: string,
-  createClient: () => Promise<ShariboClient>,
-  onEvent?: OnEventFn,
-): Promise<ShariboClient> {
-  let clientPromise = contractClientCache.get(cacheKey);
-
-  if (clientPromise) {
-    contractClientCache.delete(cacheKey);
-    contractClientCache.set(cacheKey, clientPromise);
-  } else {
-    clientPromise = createClient();
-    contractClientCache.set(cacheKey, clientPromise);
-    if (contractClientCache.size > CONTRACT_CLIENT_CACHE_LIMIT) {
-      const oldestKey = contractClientCache.keys().next().value;
-      if (oldestKey !== undefined) contractClientCache.delete(oldestKey);
-    }
-  }
-
-  try {
-    const client = await clientPromise;
-    client.emitter = new SdkEventEmitter(onEvent);
-    return client;
-  } catch (error) {
-    if (contractClientCache.get(cacheKey) === clientPromise) {
-      contractClientCache.delete(cacheKey);
-    }
-    throw error;
-  }
-}
+/**
+ * Cache of fetched verification keys, keyed by `${contractId}:${circleId}`.
+ *
+ * The VK is committed at circle creation and never changes, so it is fetched
+ * at most once per circle per session (see {@link getVk}). Cleared alongside
+ * the contract-client cache so a network/contract switch invalidates it.
+ */
+const vkCache = new Map<string, ContractVerificationKey>();
 
 export function clearContractClientCache(): void {
   contractClientCache.clear();
+  vkCache.clear();
+}
+
+/**
+ * Best-effort extraction of the contract id a client was built for, used to
+ * key {@link vkCache}. Falls back to an empty string for clients that don't
+ * expose their options (e.g. hand-rolled test doubles).
+ */
+function contractIdOf(client: ShariboClient): string {
+  const options = (client as { options?: { contractId?: unknown } } | undefined)?.options;
+  return typeof options?.contractId === "string" ? options.contractId : "";
 }
 
 export async function connect(
@@ -153,18 +130,34 @@ export async function connect(
     config.networkPassphrase,
     signer.publicKey,
   ]);
-  return getCachedContractClient(
-    cacheKey,
-    () => ContractClient.from({
-      contractId: config.contractId,
-      networkPassphrase: config.networkPassphrase,
-      rpcUrl: config.rpcUrl,
-      publicKey: signer.publicKey,
-      signTransaction: signer.signTransaction,
-      signAuthEntry: signer.signAuthEntry,
-    }),
-    config.onEvent,
-  );
+
+  const cached = contractClientCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const emitter = new SdkEventEmitter(config.onEvent);
+  const clientPromise = ContractClient.from({
+    contractId: config.contractId,
+    networkPassphrase: config.networkPassphrase,
+    rpcUrl: config.rpcUrl,
+    publicKey: signer.publicKey,
+    signTransaction: signer.signTransaction,
+    signAuthEntry: signer.signAuthEntry,
+  });
+
+  contractClientCache.set(cacheKey, clientPromise);
+
+  try {
+    const client: ShariboClient = await clientPromise;
+    client.emitter = emitter;
+    client.networkPassphrase = config.networkPassphrase;
+    return client;
+  } catch (error) {
+    contractClientCache.delete(cacheKey);
+    throw error;
+  }
 }
 
 /**
@@ -198,19 +191,33 @@ export async function connectReadOnly(
 }
 
 /**
- * Result of a contract transaction.
+ * Result of a state-changing contract transaction (createCircle / fund / claim / cancelCircle).
  *
- * @template T - The type of the transaction result.
- * @property result - The return value from the contract method.
- * @property hash - The transaction hash.
+ * @template T - Decoded return value from the contract method.
  */
 export interface TxResult<T> {
+  /** Decoded return value from the contract method (e.g. circle id for createCircle). */
   result: T;
+  /** Transaction hash (hex) of the submitted Soroban transaction. Always present after a successful signAndSend. */
   hash: string;
-  /** Ledger sequence number the transaction was included in, if available. */
+  /**
+   * Ledger sequence the transaction was included in.
+   * Optional because some RPC responses omit `getTransactionResponse.ledger`
+   * before finality is fully polled; when absent, explorers still work from `hash`.
+   */
   ledger?: number;
-  /** Fee charged for the transaction in stroops, if available. */
-  feeCharged?: string;
+  /**
+   * Actual fee charged for the transaction, in stroops, as a bigint.
+   * Optional because the RPC `getTransactionResponse` may not include `feeCharged`
+   * on every transport; when present it is coerced to bigint at this boundary.
+   */
+  feeCharged?: bigint;
+  /**
+   * Network-aware stellar.expert URL for `hash`, or null when the passphrase is
+   * unknown to EXPLORER_NETWORKS (futurenet / custom). Always set by populateTxResult
+   * when a networkPassphrase is provided; otherwise undefined.
+   */
+  explorerUrl?: string | null;
 }
 
 /**
@@ -246,17 +253,72 @@ export function explorerTxUrl(hash: string, networkPassphrase: string): string |
   return `https://stellar.expert/explorer/${network}/tx/${hash}`;
 }
 
-
-function populateTxResult<T>(
-  result: T,
-  sent: { sendTransactionResponse: { hash: string }; getTransactionResponse?: { ledger?: number; feeCharged?: string } },
-): TxResult<T> {
-  return {
-    result,
-    hash: sent.sendTransactionResponse.hash,
-    ledger: sent.getTransactionResponse?.ledger,
-    feeCharged: sent.getTransactionResponse?.feeCharged,
+/** Shape returned by @stellar/stellar-sdk contract method `signAndSend()`. */
+export type SignAndSendResult = {
+  result: unknown;
+  sendTransactionResponse: { hash?: string };
+  getTransactionResponse?: {
+    ledger?: number;
+    feeCharged?: string | number | bigint;
   };
+};
+
+function coerceFeeCharged(
+  feeCharged: string | number | bigint | undefined,
+): bigint | undefined {
+  if (feeCharged === undefined) return undefined;
+  return typeof feeCharged === "bigint" ? feeCharged : BigInt(feeCharged);
+}
+
+/**
+ * Maps a successful `signAndSend()` payload to {@link TxResult}.
+ * Exported for fixture tests; production callers use `fund` / `claim` / etc.
+ */
+export function populateTxResult<T>(
+  result: T,
+  sent: SignAndSendResult,
+  networkPassphrase?: string,
+): TxResult<T> {
+  const hash = sent.sendTransactionResponse?.hash;
+  if (hash === undefined || hash === "") {
+    throw new Error("hash");
+  }
+
+  const txResult: TxResult<T> = {
+    result,
+    hash,
+  };
+
+  const ledger = sent.getTransactionResponse?.ledger;
+  if (ledger !== undefined) {
+    txResult.ledger = ledger;
+  }
+
+  const feeCharged = coerceFeeCharged(sent.getTransactionResponse?.feeCharged);
+  if (feeCharged !== undefined) {
+    txResult.feeCharged = feeCharged;
+  }
+
+  if (networkPassphrase !== undefined) {
+    txResult.explorerUrl = explorerTxUrl(hash, networkPassphrase);
+  }
+
+  return txResult;
+}
+
+function networkPassphraseFromClient(client: ShariboClient): string | undefined {
+  const pp = client?.networkPassphrase;
+  return typeof pp === "string" ? pp : undefined;
+}
+
+/**
+ * An estimate of the transaction fee costs for an operation.
+ */
+export interface FeeEstimate {
+  /** Minimum resource fee in stroops, as reported by simulation. */
+  minResourceFee: bigint;
+  /** Total fee (base + resource) encoded in the assembled transaction, in stroops. */
+  totalFee: bigint;
 }
 
 /**
@@ -280,16 +342,20 @@ export async function estimateClaimFee(
     externalNullifier: bigint;
     proof: ContractProof;
   },
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<FeeEstimate | null> {
   try {
-    const tx: ContractTx = await withRetry(() =>
-      client.claim({
-        circle_id: args.circleId,
-        recipient: args.recipient,
-        nullifier_hash: args.nullifierHash,
-        external_nullifier: args.externalNullifier,
-        proof: args.proof,
-      }),
+    const tx: ContractTx = await withRetry(
+      () =>
+        client.claim({
+          circle_id: args.circleId,
+          recipient: args.recipient,
+          nullifier_hash: args.nullifierHash,
+          external_nullifier: args.externalNullifier,
+          proof: args.proof,
+        }),
+      retryPolicy,
+      client.emitter,
     );
     // tx has already been simulated by the SDK at this point.
     const sim = tx.simulation as Api.SimulateTransactionResponse | undefined;
@@ -309,30 +375,12 @@ export async function estimateClaimFee(
 /**
  * Creates a new Sharibo circle.
  *
- * @param client - The Sharibo contract client.
- * @param args - Circle creation parameters.
- * @param args.admin - The admin address for the circle.
- * @param args.token - The token address for contributions.
- * @param args.root - The Merkle tree root of identity commitments.
- * @param args.contribution - The required contribution amount per participant.
- * @param args.size - The maximum number of participants.
- * @param args.vk - The verification key for the zero-knowledge proof circuit.
- * @param args.feeBps - The protocol fee in basis points (0-10_000; 0 = no fee).
- * @param args.feeRecipient - The address the protocol fee is paid to.
- * @returns The circle ID and transaction hash.
+ * Shared by every write-path wrapper (`fund`, `claim`, `createCircle`,
+ * `expireRound`, `proposeAdmin`, `acceptAdmin`) so they all agree on retry
+ * policy, error decoding, and result shape.
  */
-export async function createCircle(
-  client: ShariboClient,
-  args: {
-    admin: string;
-    token: string;
-    root: bigint;
-    contribution: bigint;
-    size: number;
-    vk: ContractVerificationKey;
-    feeBps: number;
-    feeRecipient: string;
-  },
+async function simulateSignAndSend<T>(
+  build: () => Promise<ContractTx>,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<TxResult<bigint>> {
   if (args.size === 0 || args.contribution <= 0n || args.vk.ic.length !== 4) {
@@ -351,71 +399,56 @@ export async function createCircle(
     );
   }
   validateContractVerificationKey(args.vk);
+  assertInField(args.root, "root");
   try {
-    const tx: ContractTx = await withRetry(() => client.create_circle({
-      admin: args.admin,
-      token: args.token,
-      root: args.root,
-      contribution: args.contribution,
-      size: args.size,
-      vk: args.vk,
-      fee_bps: args.feeBps,
-      fee_recipient: args.feeRecipient,
-    }), retryPolicy, client.emitter);
+    const tx = await withRetry(() => build(), retryPolicy);
     const sent = await tx.signAndSend();
-    return populateTxResult(sent.result as bigint, sent);
+    return populateTxResult(
+      sent.result as bigint,
+      sent,
+      networkPassphraseFromClient(client),
+    );
   } catch (err) {
     throw decodeContractError(err);
   }
 }
 
 /**
- * Funds a circle with a contribution.
+ * Expire a stalled round so contributors can recover their funds without the
+ * admin key (contract `expire_round`, error `RoundNotExpired = 12`).
  *
- * @param client - The Sharibo contract client.
- * @param args - Funding parameters.
- * @param args.circleId - The ID of the circle to fund.
- * @param args.from - The address sending the contribution.
- * @returns The transaction hash.
+ * Only valid once the round deadline has passed; the contract rejects the
+ * call with `RoundNotExpired` otherwise. Use {@link getRoundDeadline} to
+ * learn how many ledgers remain before this call will succeed.
  */
-export async function fund(
+export async function expireRound(
   client: ShariboClient,
-  args: { circleId: bigint; from: string },
+  circleId: bigint | number,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<TxResult<void>> {
   try {
     const tx: ContractTx = await withRetry(() => client.fund({ circle_id: args.circleId, from: args.from }), retryPolicy, client.emitter);
     const sent = await tx.signAndSend();
-    return populateTxResult(undefined, sent);
+    return populateTxResult(undefined, sent, networkPassphraseFromClient(client));
   } catch (err) {
     throw decodeContractError(err);
   }
 }
 
 /**
- * Claims a reward from a circle using a zero-knowledge proof.
- *
- * @param client - The Sharibo contract client.
- * @param args - Claim parameters.
- * @param args.circleId - The ID of the circle to claim from.
- * @param args.recipient - The address to receive the reward.
- * @param args.nullifierHash - The nullifier hash to prevent double-claiming.
- * @param args.externalNullifier - The external nullifier binding to circle and round.
- * @param args.proof - The Groth16 zero-knowledge proof.
- * @returns The transaction hash.
+ * Propose a new admin for a circle (contract `propose_admin`). The proposal
+ * must be accepted by the nominee via {@link acceptAdmin} before it takes
+ * effect. Used for key rotation.
  */
-export async function claim(
+export async function proposeAdmin(
   client: ShariboClient,
-  args: {
-    circleId: bigint;
-    recipient: string;
-    nullifierHash: bigint;
-    externalNullifier: bigint;
-    proof: ContractProof;
-  },
+  circleId: bigint | number,
+  newAdmin: string,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<TxResult<void>> {
   validateContractProof(args.proof);
+  assertInField(args.nullifierHash, "nullifierHash");
+  assertInField(args.externalNullifier, "externalNullifier");
   try {
     const tx: ContractTx = await withRetry(() => client.claim({
       circle_id: args.circleId,
@@ -425,7 +458,7 @@ export async function claim(
       proof: args.proof,
     }), retryPolicy, client.emitter);
     const sent = await tx.signAndSend();
-    return populateTxResult(undefined, sent);
+    return populateTxResult(undefined, sent, networkPassphraseFromClient(client));
   } catch (err) {
     throw decodeContractError(err);
   }
@@ -434,6 +467,10 @@ export async function claim(
 /**
  * A view of a Sharibo circle's state.
  *
+ * Mirrors the contract's `CircleMeta`: the mutable/small fields, without the
+ * embedded verification key or the contributors vector. Use {@link getVk}
+ * for the one-time VK fetch and {@link getContributors} for the funder list.
+ *
  * @property admin - The admin address for the circle.
  * @property token - The token address for contributions.
  * @property root - The Merkle tree root of identity commitments.
@@ -441,7 +478,9 @@ export async function claim(
  * @property size - The maximum number of participants.
  * @property round - The current round number.
  * @property pot - The total amount in the prize pot.
- * @property contributors - Addresses that have funded the current round in order.
+ * @property vk - The Groth16 verification key. Optional: only populated when
+ *   the caller has explicitly fetched it via {@link getVk} and attached it;
+ *   the poll-friendly {@link getCircle} read never returns it.
  * @property cancelled - Whether the circle has been cancelled.
  * @property fee_bps - The protocol fee in basis points (0-10_000; 0 = no fee).
  * @property fee_recipient - The address the protocol fee is paid to.
@@ -454,8 +493,7 @@ export interface CircleView {
   size: number;
   round: number;
   pot: bigint;
-  vk: ContractVerificationKey;
-  contributors: string[];
+  vk?: ContractVerificationKey;
   cancelled: boolean;
   fee_bps: number;
   fee_recipient: string;
@@ -464,6 +502,9 @@ export interface CircleView {
 /**
  * Retrieves the current state of a circle.
  *
+ * Backed by the contract's `get_circle_meta` read, which excludes the
+ * verification key (committed at creation and immutable — fetch it once via
+ * {@link getVk}) and the contributors vector (see {@link getContributors}).
  * Uses simulation only — no transaction is submitted, no fee is charged, and
  * no funded keypair is required.  Pass a client from {@link connectReadOnly}
  * (or any signed client; signing is simply ignored for view calls).
@@ -472,17 +513,52 @@ export interface CircleView {
  * @param circleId - The ID of the circle to query.
  * @returns The circle's current state.
  */
-export async function getCircle(
+export async function acceptAdmin(
+  client: ShariboClient,
+  circleId: bigint | number,
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
+): Promise<CircleView> {
+  // get_circle_meta is a pure read: the SDK detects no signature is needed and
+  // refuses signAndSend() without `force` (there's nothing to sign/submit).
+  try {
+    const tx: ContractTx = await withRetry(() => client.get_circle_meta({ circle_id: circleId }), retryPolicy, client.emitter);
+    // Pure read — take the simulated result rather than submitting a tx (#279).
+    return tx.result as CircleView;
+  } catch (err) {
+    throw decodeContractError(err);
+  }
+}
+
+/**
+ * Retrieves a circle's Groth16 verification key.
+ *
+ * The VK is committed at circle creation and never changes, so the result is
+ * cached per `(contractId, circleId)` for the lifetime of the session —
+ * repeated calls for the same circle are served from the cache and perform no
+ * RPC. Call {@link clearContractClientCache} to invalidate.
+ *
+ * Uses simulation only — no transaction is submitted, no fee is charged, and
+ * no funded keypair is required.
+ *
+ * @param client - The Sharibo contract client.
+ * @param circleId - The ID of the circle to query.
+ * @returns The circle's verification key.
+ */
+export async function getVk(
   client: ShariboClient,
   circleId: bigint,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
-): Promise<CircleView> {
-  // get_circle is a pure read: the SDK detects no signature is needed and
-  // refuses signAndSend() without `force` (there's nothing to sign/submit).
+): Promise<ContractVerificationKey> {
+  const cacheKey = `${contractIdOf(client)}:${circleId}`;
+  const cached = vkCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
   try {
-    const tx: ContractTx = await withRetry(() => client.get_circle({ circle_id: circleId }), retryPolicy, client.emitter);
-    // Pure read — take the simulated result rather than submitting a tx (#279).
-    return tx.result as CircleView;
+    const tx: ContractTx = await withRetry(() => client.get_vk({ circle_id: circleId }), retryPolicy, client.emitter);
+    const vk = tx.result as ContractVerificationKey;
+    vkCache.set(cacheKey, vk);
+    return vk;
   } catch (err) {
     throw decodeContractError(err);
   }
@@ -492,8 +568,9 @@ export async function getCircle(
  * The subset of a circle's state the funding UI polls for: how much is in the
  * pot and which accounts have contributed so far.
  *
- * A narrow view over {@link getCircle} so callers that only drive funding
- * progress don't depend on the full `CircleView` shape.
+ * A positive `remainingLedgers` means the round is still open; zero or below
+ * means it has expired and {@link expireRound} can be invoked. `expired`
+ * mirrors that comparison for callers that only need the boolean.
  */
 export interface CircleStatus {
   pot: bigint;
@@ -502,16 +579,25 @@ export interface CircleStatus {
   cancelled: boolean;
 }
 
-/** Pure read: the funding-progress slice of a circle's on-chain state. */
+/**
+ * Pure read: the funding-progress slice of a circle's on-chain state.
+ *
+ * Composes the cheap `get_circle_meta` and `get_contributors` reads rather
+ * than the heavyweight `get_circle`, so polling never transfers the
+ * verification key.
+ */
 export async function getCircleStatus(
   client: ShariboClient,
   circleId: bigint,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<CircleStatus> {
-  const circle = await getCircle(client, circleId, retryPolicy);
+  const [circle, contributors] = await Promise.all([
+    getCircle(client, circleId, retryPolicy),
+    getContributors(client, circleId),
+  ]);
   return {
     pot: circle.pot,
-    contributors: circle.contributors ?? [],
+    contributors,
     round: circle.round,
     cancelled: circle.cancelled,
   };
@@ -531,40 +617,72 @@ export async function getCircleCount(
 }
 
 /** Pure read: the current round number for `circleId`. */
-export async function getRound(client: ShariboClient, circleId: bigint): Promise<number> {
-  const tx: ContractTx = await withRetry(() => client.get_round({ circle_id: circleId }));
+export async function getRound(
+  client: ShariboClient,
+  circleId: bigint,
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
+): Promise<number> {
+  const tx: ContractTx = await withRetry(
+    () => client.get_round({ circle_id: circleId }),
+    retryPolicy,
+    client.emitter,
+  );
   return Number(tx.result);
 }
 
 /** Pure read: the current pot balance (in token stroops) for `circleId`. */
-export async function getPot(client: ShariboClient, circleId: bigint): Promise<bigint> {
-  const tx: ContractTx = await withRetry(() => client.get_pot({ circle_id: circleId }));
+export async function getPot(
+  client: ShariboClient,
+  circleId: bigint,
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
+): Promise<bigint> {
+  const tx: ContractTx = await withRetry(
+    () => client.get_pot({ circle_id: circleId }),
+    retryPolicy,
+    client.emitter,
+  );
   return BigInt(tx.result);
 }
 
 /**
- * Pure read: compact status tuple `(round, pot, target, cancelled)`.
+ * Derive the round deadline from a circle's `round_started_ledger` and
+ * `round_deadline_ledgers` fields and the current ledger sequence.
  *
- * @returns `[round, pot, target, cancelled]` for `circleId`.
+ * Pure helper so both the SDK facade and the app can render "how long until
+ * expiry" without an extra contract view.
  */
 export async function getStatus(
   client: ShariboClient,
   circleId: bigint,
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<{ round: number; pot: bigint; target: bigint; cancelled: boolean }> {
-  const tx: ContractTx = await withRetry(() => client.get_status({ circle_id: circleId }));
+  const tx: ContractTx = await withRetry(
+    () => client.get_status({ circle_id: circleId }),
+    retryPolicy,
+    client.emitter,
+  );
   const [round, pot, target, cancelled] = tx.result as
     [bigint | number, bigint | string, bigint | string, boolean];
   return {
-    round: Number(round),
-    pot: BigInt(pot),
-    target: BigInt(target),
-    cancelled,
+    startedLedger,
+    deadlineLedgers,
+    deadlineLedger,
+    remainingLedgers,
+    expired: remainingLedgers <= 0,
   };
 }
 
 /** Pure read: the ordered list of addresses that funded the current round. */
-export async function getContributors(client: ShariboClient, circleId: bigint): Promise<string[]> {
-  const tx: ContractTx = await withRetry(() => client.get_contributors({ circle_id: circleId }));
+export async function getContributors(
+  client: ShariboClient,
+  circleId: bigint,
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
+): Promise<string[]> {
+  const tx: ContractTx = await withRetry(
+    () => client.get_contributors({ circle_id: circleId }),
+    retryPolicy,
+    client.emitter,
+  );
   return tx.result as string[];
 }
 
@@ -609,9 +727,8 @@ export async function cancelCircle(
   try {
     const tx: ContractTx = await withRetry(() => client.cancel_circle({ circle_id: args.circleId }), retryPolicy, client.emitter);
     const sent = await tx.signAndSend();
-    return populateTxResult(undefined, sent);
+    return populateTxResult(undefined, sent, networkPassphraseFromClient(client));
   } catch (err) {
     throw decodeContractError(err);
   }
 }
-
