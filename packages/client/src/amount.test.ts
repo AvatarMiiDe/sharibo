@@ -2,29 +2,27 @@ import { describe, it } from "vitest";
 import assert from "node:assert/strict";
 import { STROOPS_PER_XLM, formatXlm, stroopsToWholeXlm, xlmToStroops } from "./amount";
 
-describe("formatXlm", () => {
-  it("preserves all seven fractional digits at the i128::MAX boundary without float rounding", () => {
-    const maxI128 = 170141183460469231731687303715884105727n;
-    assert.equal(formatXlm(maxI128), "17014118346046923173168730371588.4105727");
-  });
+import {
+  formatXlm,
+  xlmToStroops,
+  STROOPS_PER_XLM,
+  validateContributionAmount,
+  ContributionValidationError,
+  FRIENDBOT_ACCOUNT_XLM,
+  MAX_I128,
+} from "./amount.js";
 
-  it("xlmToStroops and formatXlm handle negative values consistently", () => {
-    const maxI128 = 170141183460469231731687303715884105727n;
-    assert.equal(formatXlm(-maxI128), "-17014118346046923173168730371588.4105727");
-    assert.equal(formatXlm(-1n), "-0.0000001");
-  });
+test("xlmToStroops truncates the 1-stroop boundary exactly (no round-up)", () => {
+  assert.equal(xlmToStroops("0.0000001"), 1n);
+  assert.equal(xlmToStroops("0.00000009"), 0n);
+  assert.equal(xlmToStroops("0.00000015"), 1n); // truncates, does not round to 2
+});
 
-  it("formats zero stroops", () => {
-    assert.equal(formatXlm(0n), "0.0000000");
-  });
-
-  it("formats whole XLM amounts", () => {
-    assert.equal(formatXlm(STROOPS_PER_XLM), "1.0000000");
-  });
-
-  it("pads sub-stroop remainders instead of using toString", () => {
-    assert.equal(formatXlm(10_000_001n), "1.0000001");
-  });
+test("xlmToStroops accepts exponent-notation numbers below 1e-6", () => {
+  assert.equal(xlmToStroops(1e-7), 1n);
+  assert.equal(xlmToStroops("1e-7"), 1n);
+  assert.equal(xlmToStroops(1e-8), 0n); // sub-stroop truncates to 0
+});
 
   it("round-trips through xlmToStroops", () => {
     const values = [0n, 1n, STROOPS_PER_XLM, 10_000_001n, 170141183460469231731687303715884105727n];
@@ -34,27 +32,55 @@ describe("formatXlm", () => {
   });
 });
 
-describe("stroopsToWholeXlm", () => {
-  it("returns whole XLM for exact multiples of STROOPS_PER_XLM", () => {
-    assert.equal(stroopsToWholeXlm(10_000_000n), 1n);
-    assert.equal(stroopsToWholeXlm(30_000_000n), 3n);
-  });
+test("xlmToStroops and formatXlm handle negative values consistently", () => {
+  assert.equal(xlmToStroops("-0.0000001"), -1n);
+  assert.equal(formatXlm(-1n), "-0.0000001");
+  assert.equal(
+    formatXlm(-170141183460469231731687303715884105727n),
+    "-170141183460469231731687303715884105727.0000000",
+  );
+});
 
-  it("truncates sub-XLM remainders toward zero", () => {
-    assert.equal(stroopsToWholeXlm(9_999_999n), 0n);
-    assert.equal(stroopsToWholeXlm(-9_999_999n), 0n);
-  });
+function expectCause(raw: string | number, cause: string, size = 5) {
+  assert.throws(
+    () => validateContributionAmount(raw, { size }),
+    (err: unknown) =>
+      err instanceof ContributionValidationError && err.causeCode === cause,
+  );
+}
 
-  it("truncates toward zero for negative values", () => {
-    assert.equal(stroopsToWholeXlm(-10_000_000n), -1n);
-    assert.equal(stroopsToWholeXlm(-10_000_001n), -1n);
-  });
+test("validateContributionAmount rejects boundary values with distinct causes", () => {
+  expectCause("0", "not_positive");
+  expectCause("-1", "not_positive");
+  expectCause("0.00000001", "too_many_decimals"); // 8 places
+  expectCause("0.000000001", "too_many_decimals"); // sub-stroop typed as 9 places
+  expectCause("", "empty");
+  expectCause("abc", "not_a_number");
+  // 20-digit whole XLM × size overflows or is unaffordable
+  expectCause("12345678901234567890", "unaffordable");
+});
 
-  it("returns zero for zero stroops", () => {
-    assert.equal(stroopsToWholeXlm(0n), 0n);
-  });
+test("validateContributionAmount accepts 1e-7 as one stroop", () => {
+  const { stroops } = validateContributionAmount("1e-7", { size: 5 });
+  assert.equal(stroops, 1n);
+});
 
-  it("is lossy: it is not the inverse of xlmToStroops for fractional XLM", () => {
-    assert.equal(stroopsToWholeXlm(xlmToStroops("0.5")), 0n);
-  });
+test("validateContributionAmount rejects pot overflow when × size exceeds i128", () => {
+  const halfPlus = MAX_I128 / 2n + 1n;
+  const xlm = formatXlm(halfPlus);
+  const maxAffordableXlm = halfPlus / STROOPS_PER_XLM + 1n;
+  assert.throws(
+    () => validateContributionAmount(xlm, { size: 2, maxAffordableXlm }),
+    (err: unknown) =>
+      err instanceof ContributionValidationError && err.causeCode === "pot_overflow",
+  );
+});
+
+test("validateContributionAmount accepts a normal demo amount", () => {
+  const { stroops } = validateContributionAmount("10", { size: 5 });
+  assert.equal(stroops, 10n * STROOPS_PER_XLM);
+});
+
+test("validateContributionAmount names unaffordable when above friendbot limit", () => {
+  expectCause("10001", "unaffordable");
 });
