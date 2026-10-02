@@ -40,15 +40,15 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-export function validate(): ValidationResult {
+export function validate(env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>): ValidationResult {
   const errors: string[] = [];
 
-  const contractId = import.meta.env.VITE_SHARIBO_CONTRACT_ID as string | undefined;
-  const rpcUrl = import.meta.env.VITE_STELLAR_RPC_URL as string | undefined ?? NETWORKS.testnet.rpcUrl;
-  const networkPassphrase = import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE as string | undefined ?? NETWORKS.testnet.passphrase;
-  const testTokenContractId = import.meta.env.VITE_TEST_TOKEN_CONTRACT_ID as string | undefined;
+  const contractId = env.VITE_SHARIBO_CONTRACT_ID;
+  const rpcUrl = env.VITE_STELLAR_RPC_URL ?? NETWORKS.testnet.rpcUrl;
+  const networkPassphrase = env.VITE_STELLAR_NETWORK_PASSPHRASE ?? NETWORKS.testnet.passphrase;
+  const testTokenContractId = env.VITE_TEST_TOKEN_CONTRACT_ID;
 
-  if (!contractId) {
+  if (!contractId || contractId.trim().length === 0) {
     errors.push("VITE_SHARIBO_CONTRACT_ID — missing or empty");
   } else if (!isContractId(contractId)) {
     errors.push(
@@ -56,11 +56,17 @@ export function validate(): ValidationResult {
     );
   }
 
-  if (!isHttpUrl(rpcUrl)) {
+  if (!rpcUrl || rpcUrl.trim().length === 0) {
+    errors.push("VITE_STELLAR_RPC_URL — missing or empty");
+  } else if (!isHttpUrl(rpcUrl)) {
     errors.push(`VITE_STELLAR_RPC_URL — invalid URL (got "${rpcUrl}"; expected an http/https URL)`);
   }
+  
+  if (!networkPassphrase || networkPassphrase.trim().length === 0) {
+    errors.push("VITE_STELLAR_NETWORK_PASSPHRASE — missing or empty");
+  }
 
-  if (!testTokenContractId) {
+  if (!testTokenContractId || testTokenContractId.trim().length === 0) {
     errors.push("VITE_TEST_TOKEN_CONTRACT_ID — missing or empty");
   } else if (!isContractId(testTokenContractId)) {
     errors.push(
