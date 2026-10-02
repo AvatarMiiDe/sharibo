@@ -376,6 +376,8 @@ We welcome contributions to Sharibo! See [CONTRIBUTING.md](CONTRIBUTING.md) for 
 
 ## Roadmap
 
+There is a detailed mainnet readiness checklist covering audits, trusted setups, and remaining blockers: see [**`docs/mainnet-readiness.md`**](docs/mainnet-readiness.md).
+
 - Funding-side shielding (hide _who_ funded, not just who claimed).
 - Multi-round automation / on-chain turn ordering.
 - Multi-party trusted setup ceremony.
