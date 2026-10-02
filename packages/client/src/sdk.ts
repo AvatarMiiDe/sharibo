@@ -5,6 +5,7 @@ import {
   claim,
   getCircle,
   getCircleCount,
+  getStatus,
   hasClaimed,
   getStatus,
   cancelCircle,
@@ -126,10 +127,9 @@ export class ShariboSDK {
   }
 
   /**
-   * Contract-level status: the number of circles ever created on the deployed
-   * contract. Listed in issue #284's sketch of the facade API; implemented
-   * over the contract's existing read (there is no `get_status` contract
-   * method), so this is an alias for `getCircleCount`.
+   * Reads a circle's contract-level status (round, pot, pot target, cancelled).
+   * Mirrors the `getStatus` free function, which wraps the contract's
+   * `get_status` read.
    */
   getStatus(retryPolicy?: RetryPolicy): Promise<bigint> {
     return this.getCircleCount(retryPolicy);
