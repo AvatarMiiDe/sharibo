@@ -229,7 +229,7 @@ Fresh-machine steps, in order. Everything below targets **Stellar testnet only**
 | [Rust](https://rustup.rs/) + `wasm32v1-none` target | rustc **1.94.1** (pinned in rust-toolchain.toml) | `rustc 1.94.1` |
 | [`stellar` CLI](https://developers.stellar.org/docs/tools/cli/install-cli) | **v21.0** (protocol 22 required for BLS12-381 host functions; protocol 23 for `soroban-sdk = "23"`) | `23.4.1` |
 | [Node.js](https://nodejs.org/) | **20.6.0** (`process.loadEnvFile`, used in `scripts/e2e.ts`) | `v24.11.1` |
-| [`circom`](https://docs.circom.io/getting-started/installation/) on `PATH` | **2.1.6** (pragma in `circuits/membership.template.circom`) | `2.2.3` (built from source) |
+| [`circom`](https://docs.circom.io/getting-started/installation/) on `PATH` | **2.1.6** (pragma in `circuits/membership.template.circom`) | `2.2.3` (pinned in `circuits/config.json`, asserted by `compile.sh`) |
 
 `snarkjs` (`0.7.6`) is a devDependency in `circuits/package.json` — no separate global install required; it runs via `npx` during `npm run setup`.
 
@@ -375,6 +375,8 @@ We welcome contributions to Sharibo! See [CONTRIBUTING.md](CONTRIBUTING.md) for 
 `@stellar/stellar-sdk` is declared independently in `app`, `packages/client`, and `scripts`, and pinned to a single resolved version via a root `overrides` entry. **Bump `stellar-sdk` in all three places at once** — `npm run check:stellar-sdk` (also run automatically on `npm install`) fails the build if the declared ranges ever drift apart.
 
 ## Roadmap
+
+There is a detailed mainnet readiness checklist covering audits, trusted setups, and remaining blockers: see [**`docs/mainnet-readiness.md`**](docs/mainnet-readiness.md).
 
 - Funding-side shielding (hide _who_ funded, not just who claimed).
 - Multi-round automation / on-chain turn ordering.

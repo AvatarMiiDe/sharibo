@@ -88,6 +88,7 @@ export function resolveSigner(
   };
 }
 
+const CONTRACT_CLIENT_CACHE_LIMIT = 16;
 const contractClientCache = new Map<string, Promise<ShariboClient>>();
 
 /**
@@ -119,8 +120,11 @@ export async function connect(
   keypairOrSigner: Keypair | ShariboSigner,
 ): Promise<ShariboClient> {
   const signer = resolveSigner(keypairOrSigner, config.networkPassphrase);
-
+  // Signed key: mode, contractId, rpcUrl, networkPassphrase, signer public key.
+  // Read-only uses its own mode key without a signer. onEvent is excluded and
+  // replaced on each call because callbacks are per-caller, not client identity.
   const cacheKey = JSON.stringify([
+    "signed",
     config.contractId,
     config.rpcUrl,
     config.networkPassphrase,
@@ -168,12 +172,22 @@ export async function connect(
 export async function connectReadOnly(
   config: ShariboNetworkConfig,
 ): Promise<ShariboClient> {
-  return ContractClient.from({
-    contractId: config.contractId,
-    networkPassphrase: config.networkPassphrase,
-    rpcUrl: config.rpcUrl,
-    // publicKey omitted — the SDK accepts undefined for simulation-only calls
-  });
+  const cacheKey = JSON.stringify([
+    "read-only",
+    config.contractId,
+    config.rpcUrl,
+    config.networkPassphrase,
+  ]);
+  return getCachedContractClient(
+    cacheKey,
+    () => ContractClient.from({
+      contractId: config.contractId,
+      networkPassphrase: config.networkPassphrase,
+      rpcUrl: config.rpcUrl,
+      // publicKey omitted — the SDK accepts undefined for simulation-only calls
+    }),
+    config.onEvent,
+  );
 }
 
 /**

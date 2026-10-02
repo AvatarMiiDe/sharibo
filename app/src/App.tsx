@@ -6,6 +6,7 @@ import {
   verificationKeyToContractFormat,
   connect,
   connectReadOnly,
+  clearContractClientCache,
   createCircle,
   fund,
   claim,
@@ -37,6 +38,7 @@ import {
   InvalidInputError,
   describeError,
   networkOf,
+  formatXlmDisplay,
 } from "@sharibo/client";
 import { config, configError } from "./config";
 import { LanguageSwitcher, useI18n } from "./i18n";
@@ -62,7 +64,7 @@ import { Toaster } from "./components/Toaster";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { useSdkEvents } from "./hooks/useSdkEvents";
-import { diagnose, type Failure } from "./state/circleMachine";
+import type { Failure } from "./state/circleMachine";
 import { copyDebugBundle, type BundleInput } from "./lib/debugBundle";
 import type { LoggedSdkEvent } from "./lib/sdkEventLog";
 
@@ -82,7 +84,6 @@ const NETWORK = {
 };
 const TOKEN = config?.testTokenContractId ?? "";
 const LEVELS = TREE_LEVELS;
-const CIRCLE_SIZE = 5;
 const README_URL = "https://github.com/crackedstudio/sharibo#honest-limitations";
 
 const isTestnet = networkOf(NETWORK.networkPassphrase) === "testnet";
@@ -396,7 +397,7 @@ function ClaimProgress({ stage, elapsedSeconds }: { stage: ClaimStage; elapsedSe
             className={`${styles.step} ${i < activeIndex ? styles.done : i === activeIndex ? styles.active : ""}`}
           >
             <span className={styles.stepDot}>{i < activeIndex ? "✓" : i + 1}</span>
-            {CLAIM_STAGE_LABELS[s]}
+            {stageLabels[s]}
           </div>
         ))}
       </div>
@@ -530,8 +531,7 @@ function MemberRing({ members, revealed }: { members: { funded: boolean; pending
       </div>
       {revealed && (
         <p id={captionId} role="note" className={styles.ringCaption}>
-          Payout landed on the address above — cryptographically, it could be tied to <em>any</em>{" "}
-          of the {members.length} members in the ring. An outside observer cannot tell which.
+          {t("ring.caption", { count: members.length })}
         </p>
       )}
     </div>
@@ -711,17 +711,6 @@ export default function App() {
   // resetToLanding and the unmount cleanup can cancel it synchronously.
   const claimAbortRef = useRef<AbortController | null>(null);
 
-  // Abort any in-flight claim when the component unmounts (e.g. the user
-  // navigates away mid-proof).  This prevents a stale setState from firing on
-  // a dead component and triggering React's "Can't perform a React state
-  // update on an unmounted component" warning.
-  useEffect(() => {
-    return () => {
-      claimAbortRef.current?.abort();
-    };
-  }, []);
-  const fundedCount = members.filter((m) => m.funded).length;
-  const fullyFunded = pot === contribution * BigInt(CIRCLE_SIZE);
   const { announce, message: liveRegionMessage } = usePoliteLiveRegion(120);
 
   // Sync funding state from on-chain data. Reads the latest circle through a
@@ -797,7 +786,7 @@ export default function App() {
     if (fullyFunded) {
       announce(t("liveRegion.claimStepReady"));
     }
-  }, [announce, busy, circlePhase, claimResult, error, fullyFunded]);
+  }, [announce, busy, circlePhase, claimResult, error, fullyFunded, t]);
 
   // ── Focus management ────────────────────────────────────────────────────
   // When a screen or major section appears, move keyboard focus to its
@@ -890,6 +879,7 @@ export default function App() {
     // Cancel any in-flight proof generation / artifact download.
     claimAbortRef.current?.abort();
     claimAbortRef.current = null;
+    clearContractClientCache();
 
     setPreviousCircleId(circleId);
     clearSession();
@@ -1114,6 +1104,7 @@ export default function App() {
       // Check for network mismatch between wallet and app config
       const mismatch = checkNetworkMatch(networkRes.network, NETWORK.networkPassphrase);
       if (mismatch) {
+        clearContractClientCache();
         throw new Error(
           `Your Freighter wallet is connected to ${mismatch.walletNetwork}, ` +
           `but this app is configured for ${mismatch.appNetwork}. ` +
@@ -1135,6 +1126,7 @@ export default function App() {
           const currentNetworkRes = await getNetworkDetails();
           const currentMismatch = checkNetworkMatch(currentNetworkRes.network, NETWORK.networkPassphrase);
           if (currentMismatch) {
+            clearContractClientCache();
             throw new Error(
               `Your Freighter wallet is connected to ${currentMismatch.walletNetwork}, ` +
               `but this app is configured for ${currentMismatch.appNetwork}. ` +
@@ -1432,13 +1424,11 @@ export default function App() {
           </div>
           <h1>SHARIBO</h1>
           <p className={styles.tagline}>
-            A private rotating savings circle — on Stellar, with real
-            zero-knowledge proofs.
+            {t("landing.tagline")}
           </p>
           <p className={styles.sub}>
-            Every round, everyone contributes. Every round, one member takes the
-            pot. Sharibo proves <em>who's entitled to claim</em> without ever
-            revealing <em>who</em> claimed.
+            {t("landing.sub.before")} <em>{t("landing.sub.em1")}</em> {t("landing.sub.middle")}{" "}
+            <em>{t("landing.sub.em2")}</em> {t("landing.sub.after")}
           </p>
           <p className={styles.sub}>
             Every round, everyone contributes. Every round, one member takes the
@@ -1485,8 +1475,7 @@ export default function App() {
             </p>
           )}
           <p className={styles.fineprint}>
-            Testnet only. Demo identities are generated fresh in your browser,
-            never reused.
+            {t("landing.testnetFineprint")}
           </p>
           {prevCircle && (
             <p className={styles.fineprint}>
@@ -1500,8 +1489,6 @@ export default function App() {
       </div>
     );
   }
-
-  const step: 0 | 1 | 2 | 3 = claimResult ? 3 : fullyFunded ? 2 : 1;
 
   return (
     <div className={styles.page}>
@@ -1668,6 +1655,7 @@ export default function App() {
             <button className="btn btn-primary" disabled={!online || !!busy} onClick={doClaim}>
               {claimStage ? CLAIM_STAGE_LABELS[claimStage] : "Generate proof & claim"}
             </button>
+            {claimStage && <ClaimProgress stage={claimStage} elapsedSeconds={proveElapsedSeconds} />}
             <ClaimExplainer />
             {busy && (
               <p className={styles.techline}>
@@ -1681,7 +1669,7 @@ export default function App() {
         )}
 
         {claimResult && (
-          <div className={styles.result}>
+          <div className={styles.result} data-testid="claim-result">
             <h2 ref={payoutHeadingRef} tabIndex={-1}>
               {t("result.heading")}
             </h2>

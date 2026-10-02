@@ -164,6 +164,8 @@ export const generateProof = vi.fn(async () => ({
 
 export const verifyProofLocally = vi.fn(async (): Promise<number> => 1);
 
+export const setArtifactOnEvent = vi.fn();
+
 export const estimateClaimFee = vi.fn(
   async (): Promise<import("@sharibo/client").FeeEstimate | null> => ({
     minResourceFee: 500_000n,
