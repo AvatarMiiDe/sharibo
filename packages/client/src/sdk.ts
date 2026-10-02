@@ -1,20 +1,23 @@
-import { Keypair } from "@stellar/stellar-sdk";
 import {
   connect,
-  resolveSigner,
   createCircle,
   fund,
   claim,
   getCircle,
   getCircleCount,
   hasClaimed,
+  getStatus,
+  cancelCircle,
+  getCircleStatus,
+  getRound,
+  getPot,
+  getContributors,
+  estimateClaimFee,
   type ShariboNetworkConfig,
   type ShariboSigner,
-  type ShariboClient,
   type TxResult,
-  type CircleView,
 } from "./contract.js";
-import type { ContractProof, ContractVerificationKey } from "./prove.js";
+import { Keypair } from "@stellar/stellar-sdk";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
 
 export interface ShariboSDKOptions {
@@ -52,18 +55,13 @@ export interface ClaimArgs {
 }
 
 /**
- * A ShariboSDK facade for interacting with the Sharibo contract.
+ * Object-oriented facade over the free functions in `contract.ts`.
  *
- * Holds the contract client, the network config, and the retry policy once at
- * creation, so callers stop threading an untyped `client` through every call:
- *
- *   const sdk = await ShariboSDK.connect(config, signer);
- *   const { result: circleId } = await sdk.createCircle({ ... });
- *   await sdk.fund({ circleId, from });
- *   await sdk.claim({ circleId, ... });
- *
- * `connect` is async because it resolves the signer and constructs the
- * underlying @stellar/stellar-sdk contract client.
+ * Each method is a thin delegation that threads the connected `client` and
+ * the configured `retryPolicy` through to the corresponding free function,
+ * so callers don't have to pass them by hand. The free functions remain the
+ * low-level layer (see `docs/adr/003-client-boundary.md`); this facade is the
+ * recommended entry point for application code.
  */
 export class ShariboSDK {
   /** The network configuration this instance was created with. */
@@ -87,31 +85,15 @@ export class ShariboSDK {
     this.networkConfig = networkConfig;
     this.client = client;
     this.retryPolicy = retryPolicy;
-    this.publicKey = publicKey;
-    this.signer = signer;
   }
 
-  /**
-   * Creates an SDK instance bound to one signer and one network.
-   *
-   * @param config - Network configuration (contract id, RPC url, passphrase).
-   * @param keypairOrSigner - Keypair, or a wallet-style signer.
-   * @param options - Optional overrides (e.g. a custom retry policy).
-   */
   static async connect(
     config: ShariboNetworkConfig,
     keypairOrSigner: Keypair | ShariboSigner,
-    options: ShariboSDKOptions = {},
+    retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
   ): Promise<ShariboSDK> {
     const client = await connect(config, keypairOrSigner);
-    const { publicKey } = resolveSigner(keypairOrSigner, config.networkPassphrase);
-    return new ShariboSDK(
-      config,
-      client,
-      options.retryPolicy ?? DEFAULT_RETRY_POLICY,
-      publicKey,
-      keypairOrSigner,
-    );
+    return new ShariboSDK(client, retryPolicy);
   }
 
   private policy(override?: RetryPolicy): RetryPolicy {

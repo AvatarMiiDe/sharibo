@@ -47,7 +47,8 @@ export function xlmToStroops(xlm: number | bigint | string): bigint {
   }
 
   const negative = value.startsWith("-");
-  const [wholePart, fractionalPart = ""] = value.replace(/^[+-]/, "").split(".");
+  const unsigned = value.replace(/^[+-]/, "");
+  const [wholePart, fractionalPart = ""] = unsigned.split(".");
 
   const wholeUnits = BigInt(wholePart || "0");
   // Truncate — do not round — past the stroop boundary.

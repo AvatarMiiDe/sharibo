@@ -84,3 +84,11 @@ test("validateContributionAmount accepts a normal demo amount", () => {
 test("validateContributionAmount names unaffordable when above friendbot limit", () => {
   expectCause("10001", "unaffordable");
 });
+
+test("xlmToStroops(formatXlm(n)) round-trips for any non-negative stroop count", () => {
+  fc.assert(
+    fc.property(fc.bigInt({ min: 0n, max: 170141183460469231731687303715884105727n }), (n) => {
+      assert.equal(xlmToStroops(formatXlm(n)), n);
+    }),
+  );
+});
