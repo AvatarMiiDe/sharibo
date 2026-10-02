@@ -63,6 +63,7 @@
     "getPot": "function",
     "getRound": "function",
     "getStatus": "function",
+    "getVk": "function",
     "hasClaimed": "function",
     "isTestnet": "function",
     "makeCircleId": "function",

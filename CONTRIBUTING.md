@@ -61,7 +61,7 @@ We use a set of topic labels to categorize issues and pull requests. These label
 
 ## Review expectations
 
-This repo historically had **no CI**, so human review remains the primary gate — a merged PR is effectively the last check before the code lands. Contract line-coverage is now also enforced in GitHub Actions (`.github/workflows/coverage.yml`) against `coverage-thresholds.json`. `.github/CODEOWNERS` requests the owning reviewers automatically on every PR.
+This repo historically had **no CI**, so human review remains the primary gate — a merged PR is effectively the last check before the code lands. Contract line-coverage is now also enforced in GitHub Actions (`.github/workflows/coverage.yml`) against `coverage-thresholds.json`. `.github/CODEOWNERS` requests the owning reviewers automatically on every PR. Branch protection on `main` requires CODEOWNERS review before merge - a CODEOWNERS file without branch protection only requests reviewers, it does not require them (issue #541).
 
 - **Reviewers confirm the gate passed on the merge result.** Because there is no CI, the reviewer is responsible for confirming the local verification gate passes on the **merge result**, not just on the branch as it was pushed. Today that means running `just all` (circuit tests, contract tests, client typecheck; e2e separately), and the umbrella `just verify` recipe that codifies this is tracked in issue [#222](https://github.com/crackedstudio/sharibo/issues/222) — merge conflicts resolved carelessly are how landed work gets silently reverted.
 - **Security-critical paths require a domain reviewer.** `circuits/**` and `contracts/**` changes must be reviewed by someone who reads circom / Rust respectively, not just by whoever happens to be around.
@@ -166,9 +166,67 @@ In short:
 
 Running `npm run lint` will catch violations.
 
+## Setup
+
+For setting up your local environment, we recommend running `./scripts/bootstrap.sh` as described in the README. This script will install dependencies, compile the circuit, and set up your environment variables. It also automatically configures git hooks by invoking `scripts/maintenance/install-hooks.sh` to prevent accidentally committing sensitive data such as Stellar secret keys. If you want to configure these hooks manually, you can run:
+
+```bash
+bash scripts/maintenance/install-hooks.sh
+```
+
 ## Setup trouble?
 
 Getting a fresh machine running and tripping on a toolchain issue (`circom`, `wasm32v1-none`, `stellar` vs `soroban`, friendbot limits, testnet resets, missing `circuits/build/`)? See [docs/troubleshooting.md](docs/troubleshooting.md) for symptom → cause → fix walkthroughs.
+
+## Tests must be hermetic
+
+**The default test command must pass with networking disabled.**
+
+`npm test` (and `just test`, `just scripts-test`) contacts no host, spends no
+friendbot quota, and must not fail because a third-party service is down, a
+proxy rejected you, or you are on a plane. A unit suite that reaches the network
+cannot be a gate, and a suite that is red for environmental reasons trains
+contributors to ignore red.
+
+Concretely, for `scripts/`:
+
+| | |
+|---|---|
+| **Default** — `npm test --workspace=scripts` | Hermetic. Glob is `*.test.ts`. Stub `fetch`, or point at a local `http.createServer`. |
+| **Live** — `npm run test:live --workspace=scripts` (`just scripts-test-live`) | Opt-in. May reach friendbot / Horizon / testnet. Naming convention: `*.live.ts`. |
+| **Probe** — `npm run smoke` | The live read-only deployment health check. Not part of any suite. |
+
+Rules of thumb:
+
+- **Never call a public host from a `*.test.ts`.** If you need a slow response, a
+  4xx, or a 500, serve it from a local `http.createServer` — hermetic and faster.
+  `httpbin.org` is explicitly not acceptable: a public demo service with no
+  availability guarantee.
+- **Never call friendbot from a test suite.** `just test` deliberately keeps
+  e2e out of the default path because it needs live funds and friendbot quota.
+  A test that calls friendbot bypasses that on purpose.
+- **A URL in a fixture is not a request**, but prefer a reserved TLD
+  (`https://rpc.invalid`, `https://example.test`) over a real hostname anyway,
+  so nobody later adds a call against a value that was only ever meant to be a
+  string. RFC 2606 reserves `.invalid`, `.test` and `.example`; they can never
+  resolve.
+- **Do not mutate the developer's `.env`.** Point the script at a throwaway
+  fixture with `SHARIBO_ENV_FILE`, or hand the child process an explicit
+  environment. `node --test` runs files in parallel, so two test files writing
+  the same shared file race.
+
+These rules are enforced, not just documented: `scripts/hermeticity.test.ts`
+fails the default suite if any file in the default glob names a host outside the
+allowlist, or if the two globs stop being disjoint.
+
+> **Why live tests are named `*.live.ts` and not `*.live.test.ts`:** Node's
+> `--test` glob has no exclusion syntax. Passing `"!*.live.test.ts"` is
+> silently ignored, and a `*.test.ts` glob matches `*.live.test.ts` anyway — so
+> a live test named that way runs in the default suite and burns friendbot
+> quota on every `npm test`. A `.live.ts` suffix cannot be matched by a
+> `*.test.ts` glob, which is the only thing that reliably separates the two
+> lanes. `hermeticity.test.ts` asserts the invariant, so the naming cannot be
+> "tidied up" back into a silent regression.
 
 ## Pre-PR checklist
 
@@ -179,3 +237,22 @@ Before opening a pull request, run the authoritative local verification gate:
 - The gate intentionally excludes `e2e`, circuit trusted setup (`just circuits`), mutation, and benchmarks — those are slow and/or spend testnet friendbot funds. Run them on demand when your change touches those areas.
 
 If `just ci` passes locally, it's the single documented answer to "did I break anything?" and a good signal your change is ready for review.
+
+## Releases
+
+A release is a git tag plus a `CHANGELOG.md` entry plus the deployment record.
+Every release must accompany (issue #540):
+
+1. A version bump done deliberately: the contract (`contracts/sharibo/Cargo.toml`)
+   and the circuit are the load-bearing artifacts - version those first, then let
+   the TS packages (`package.json` files) follow.
+2. A `CHANGELOG.md` entry (Keep-a-Changelog format) recording schema-version and
+   circuit changes.
+3. A Deployments row in `docs/deployment.md`: tag -> contract ID ->
+   `Circle.schema_version` -> `verification_key.json` SHA-256
+   (`sha256sum circuits/verification_key.json`) -> circom version -> Rust toolchain.
+4. A testnet reset produces a new Deployments row (see `docs/runbook-testnet-reset.md`);
+   never overwrite the previous row - append.
+
+Releases stay manual until there is a reason to automate: release automation on
+a repo with no CI would be premature.

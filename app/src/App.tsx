@@ -6,6 +6,7 @@ import {
   verificationKeyToContractFormat,
   connect,
   connectReadOnly,
+  clearContractClientCache,
   createCircle,
   fund,
   claim,
@@ -21,10 +22,6 @@ import {
   POLL_RETRY_POLICY,
   PATIENT_RETRY_POLICY,
   type Identity,
-  type ContractProof,
-  type CircleId,
-  type NullifierHash,
-  type ExternalNullifier,
   makeCircleId,
   makeExternalNullifier,
   ContractError,
@@ -42,13 +39,13 @@ import {
   InvalidInputError,
   describeError,
   networkOf,
+  formatXlmDisplay,
 } from "@sharibo/client";
 import { config, configError } from "./config";
 import { LanguageSwitcher, useI18n } from "./i18n";
 import { usePoliteLiveRegion } from "./usePoliteLiveRegion";
 import { ArtifactProgress } from "./components/ArtifactProgress.js";
 import { explorerTx, short, explorerAccount, explorerContract } from "./lib/explorer";
-import type { CirclePhase } from "./hooks/useCircleFlow";
 import { MemberRingSkeleton } from "./components/MemberRing";
 import { FundingListSkeleton } from "./components/FundingList";
 import {
@@ -68,7 +65,7 @@ import { Toaster } from "./components/Toaster";
 import { ConnectionStatus } from "./components/ConnectionStatus";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { useSdkEvents } from "./hooks/useSdkEvents";
-import { diagnose, type Failure } from "./state/circleMachine";
+import type { Failure } from "./state/circleMachine";
 import { copyDebugBundle, type BundleInput } from "./lib/debugBundle";
 import type { LoggedSdkEvent } from "./lib/sdkEventLog";
 
@@ -88,7 +85,6 @@ const NETWORK = {
 };
 const TOKEN = config?.testTokenContractId ?? "";
 const LEVELS = TREE_LEVELS;
-const CIRCLE_SIZE = 5;
 const README_URL = "https://github.com/crackedstudio/sharibo#honest-limitations";
 
 const isTestnet = networkOf(NETWORK.networkPassphrase) === "testnet";
@@ -362,13 +358,6 @@ interface Member {
   pending?: boolean; // Optimistic flag while transaction is in flight
 }
 
-interface ClaimResult {
-  recipient: string;
-  hash: string;
-  proofDurationMs: number;
-  verifyTimeMs: number;
-}
-
 // The visible stages of doClaim, in the order they actually occur. snarkjs's
 // fullProve is one opaque call, so "proving" covers witness computation +
 // proof generation together — it gets its own elapsed timer instead of a
@@ -409,7 +398,7 @@ function ClaimProgress({ stage, elapsedSeconds }: { stage: ClaimStage; elapsedSe
             className={`${styles.step} ${i < activeIndex ? styles.done : i === activeIndex ? styles.active : ""}`}
           >
             <span className={styles.stepDot}>{i < activeIndex ? "✓" : i + 1}</span>
-            {CLAIM_STAGE_LABELS[s]}
+            {stageLabels[s]}
           </div>
         ))}
       </div>
@@ -543,8 +532,7 @@ function MemberRing({ members, revealed }: { members: { funded: boolean; pending
       </div>
       {revealed && (
         <p id={captionId} role="note" className={styles.ringCaption}>
-          Payout landed on the address above — cryptographically, it could be tied to <em>any</em>{" "}
-          of the {members.length} members in the ring. An outside observer cannot tell which.
+          {t("ring.caption", { count: members.length })}
         </p>
       )}
     </div>
@@ -724,29 +712,22 @@ export default function App() {
   // resetToLanding and the unmount cleanup can cancel it synchronously.
   const claimAbortRef = useRef<AbortController | null>(null);
 
-  // Abort any in-flight claim when the component unmounts (e.g. the user
-  // navigates away mid-proof).  This prevents a stale setState from firing on
-  // a dead component and triggering React's "Can't perform a React state
-  // update on an unmounted component" warning.
-  useEffect(() => {
-    return () => {
-      claimAbortRef.current?.abort();
-    };
-  }, []);
-  const fundedCount = members.filter((m) => m.funded).length;
-  const fullyFunded = pot === contribution * BigInt(CIRCLE_SIZE);
   const { announce, message: liveRegionMessage } = usePoliteLiveRegion(120);
 
-  // Sync funding state from on-chain data
+  // Sync funding state from on-chain data. Reads the latest circle through a
+  // ref so an in-flight read that finishes after reset does not dispatch.
   const syncFundingState = useCallback(async () => {
-    if (!admin || circleId === null) return;
+    const current = selectCircle(circleStateRef.current);
+    if (!current.admin || current.circleId === null) return;
+    const adminKey = current.admin;
+    const id = current.circleId;
     try {
-      const { connect, getCircle } = await import("@sharibo/client");
+      const { connect, getCircle, getContributors } = await import("@sharibo/client");
       const adminClient = await connect(NETWORK, admin);
       const circle = await getCircle(adminClient, circleId, POLL_RETRY_POLICY);
 
       setPot(circle.pot);
-      setOnChainContributors(circle.contributors);
+      setOnChainContributors(contributors);
       setCancelled(circle.cancelled);
       setFeeBps(circle.fee_bps ?? 0);
       setFeeRecipient(circle.fee_recipient ?? "");
@@ -763,7 +744,7 @@ export default function App() {
     } catch (e) {
       console.error("Failed to sync funding state:", e);
     }
-  }, [admin, circleId]);
+  }, []);
 
   // Sync funding state when circleId changes or on mount
   useEffect(() => {
@@ -806,7 +787,7 @@ export default function App() {
     if (fullyFunded) {
       announce(t("liveRegion.claimStepReady"));
     }
-  }, [announce, busy, circlePhase, claimResult, error, fullyFunded]);
+  }, [announce, busy, circlePhase, claimResult, error, fullyFunded, t]);
 
   // ── Focus management ────────────────────────────────────────────────────
   // When a screen or major section appears, move keyboard focus to its
@@ -841,8 +822,10 @@ export default function App() {
     let mounted = true;
     async function checkEligibility() {
       if (!fullyFunded || claimResult || !circleId || !admin) return;
+      if (readCircleStatus() !== "readyToClaim") return;
+      let failed = false;
       try {
-        setBusy("Checking member eligibility…");
+        dispatch({ type: "setBusy", busy: "Checking member eligibility…" });
         const client = await import("@sharibo/client");
         const { computeExternalNullifier, computeNullifierHash, connect, hasClaimed, makeNullifierHash } = client;
         const external = await computeExternalNullifier(circleId, BigInt(round));
@@ -853,12 +836,18 @@ export default function App() {
             return await hasClaimed(adminClient, circleId, nullifier);
           }),
         );
-        if (!mounted) return;
-        setMembers((prev) => prev.map((m, i) => ({ ...m, ineligible: results[i], ineligibleReason: results[i] ? "Already claimed in this circle" : undefined })));
+        if (!mounted || readCircleStatus() !== "readyToClaim") return;
+        dispatch({
+          type: "setEligibility",
+          ineligible: results,
+          reason: "Already claimed in this circle",
+        });
       } catch (e) {
         setError(formatError(e, t));
       } finally {
-        if (mounted) setBusy(null);
+        if (mounted && !failed && readCircleStatus() === "readyToClaim") {
+          dispatch({ type: "clearBusy" });
+        }
       }
     }
     checkEligibility();
@@ -891,6 +880,7 @@ export default function App() {
     // Cancel any in-flight proof generation / artifact download.
     claimAbortRef.current?.abort();
     claimAbortRef.current = null;
+    clearContractClientCache();
 
     setPreviousCircleId(circleId);
     clearSession();
@@ -939,7 +929,7 @@ export default function App() {
 
     const newTree = MerkleTree.create(
       LEVELS,
-      loadedMembers.map((m: any) => m.identity.commitment)
+      loadedMembers.map((m: any) => m.identity.commitment),
     );
     setTree(newTree);
 
@@ -957,7 +947,6 @@ export default function App() {
 
     // Sync from on-chain after loading state
     setTimeout(() => syncFundingState(), 100);
-    setCirclePhase("ready");
   }
 
   async function startCircle() {
@@ -1008,7 +997,7 @@ export default function App() {
         newMembers.map((m) => m.identity.commitment),
       );
 
-      setBusy(t("busy.creating"));
+      dispatch({ type: "setBusy", busy: t("busy.creating") });
       const vkJson = await fetch("/circuits/verification_key.json").then((r) =>
         r.json(),
       );
@@ -1061,8 +1050,7 @@ export default function App() {
 
   async function fundMember(i: number) {
     if (!admin || circleId === null) return;
-    setError(null);
-    setBusy(t("fund.busy", { index: i + 1 }));
+    dispatch({ type: "setBusy", busy: t("fund.busy", { index: i + 1 }) });
     try {
       const { connect, fund } = await import("@sharibo/client");
       const m = members[i];
@@ -1105,8 +1093,7 @@ export default function App() {
 
   async function fundWithFreighter(i: number) {
     if (!admin || circleId === null) return;
-    setError(null);
-    setBusy(t("fund.busyFreighter", { index: i + 1 }));
+    dispatch({ type: "setBusy", busy: t("fund.busyFreighter", { index: i + 1 }) });
     try {
       const allowedRes = await isAllowed();
       if (!allowedRes.isAllowed) {
@@ -1118,6 +1105,7 @@ export default function App() {
       // Check for network mismatch between wallet and app config
       const mismatch = checkNetworkMatch(networkRes.network, NETWORK.networkPassphrase);
       if (mismatch) {
+        clearContractClientCache();
         throw new Error(
           `Your Freighter wallet is connected to ${mismatch.walletNetwork}, ` +
           `but this app is configured for ${mismatch.appNetwork}. ` +
@@ -1139,6 +1127,7 @@ export default function App() {
           const currentNetworkRes = await getNetworkDetails();
           const currentMismatch = checkNetworkMatch(currentNetworkRes.network, NETWORK.networkPassphrase);
           if (currentMismatch) {
+            clearContractClientCache();
             throw new Error(
               `Your Freighter wallet is connected to ${currentMismatch.walletNetwork}, ` +
               `but this app is configured for ${currentMismatch.appNetwork}. ` +
@@ -1156,12 +1145,7 @@ export default function App() {
         }
       };
 
-      // Set optimistic pending state
-      setMembers((prev) =>
-        prev.map((mm, idx) =>
-          idx === i ? { ...mm, pending: true } : mm,
-        ),
-      );
+      dispatch({ type: "patchMember", index: i, pending: true });
 
       const { connect, fund } = await import("@sharibo/client");
       const memberClient = await connect(NETWORK, await toShariboSigner(signer));
@@ -1170,7 +1154,6 @@ export default function App() {
         from: pubKey,
       });
 
-      // Sync with on-chain state after submission
       await syncFundingState();
 
       // Update fund hash and freighter key for the successful transaction
@@ -1192,6 +1175,8 @@ export default function App() {
 
   async function doClaim() {
     if (!admin || !tree || circleId === null) return;
+    const status = readCircleStatus();
+    if (status !== "readyToClaim" && !(status === "failed" && !claimResult && fullyFunded)) return;
 
     // Cancel any previous claim that might still be running.
     claimAbortRef.current?.abort();
@@ -1199,10 +1184,8 @@ export default function App() {
     claimAbortRef.current = controller;
     const { signal } = controller;
 
-    setError(null);
-    setClaimResult(null);
-    setRejection(null);
-    setBusy(t("busy.claiming"));
+    dispatch({ type: "beginProve", busy: t("busy.claiming") });
+    let ticking = false;
     try {
       const [{ Keypair }, { computeExternalNullifier, connect, claim, getCircle, hasClaimed }, { generateProof, verifyProofLocally }] = await Promise.all([
         import("@stellar/stellar-sdk"),
@@ -1252,6 +1235,7 @@ export default function App() {
           { signal, onEvent },
         );
       } finally {
+        ticking = false;
         clearInterval(proveTimer);
       }
 
@@ -1267,7 +1251,12 @@ export default function App() {
       await fundWithFriendbot(recipient);
 
       if (signal.aborted) return;
-      setClaimStage("submitting");
+      dispatch({
+        type: "beginClaim",
+        proof: generated.proof,
+        nullifierHash: generated.nullifierHash,
+        provingElapsedMs: generated.provingTimeMs,
+      });
       const adminClient = await connect({ ...NETWORK, onEvent: (e) => setEvents(prev => [...prev, e]) }, admin);
       const { hash } = await claim(
         adminClient,
@@ -1290,10 +1279,11 @@ export default function App() {
         proofDurationMs: generated.provingTimeMs,
         verifyTimeMs,
       });
-      setNullifierClaimed(await hasClaimed(adminClient, circleId, generated.nullifierHash));
 
-      // Sync with on-chain state after claim
       await syncFundingState();
+      if (!signal.aborted && readCircleStatus() === "claimed") {
+        dispatch({ type: "clearBusy" });
+      }
     } catch (e) {
       setError(formatError(e, t));
     } finally {
@@ -1310,9 +1300,9 @@ export default function App() {
 
   async function claimAgain() {
     if (!admin || circleId === null || !proof || nullifierHash === null) return;
-    setError(null);
-    setRejection(null);
-    setBusy(t("busy.refunding"));
+    const status = readCircleStatus();
+    if (status !== "claimed" && !(status === "failed" && claimResult)) return;
+    dispatch({ type: "setBusy", busy: t("busy.refunding"), clearRejection: true });
     try {
       const { connect, fund, computeExternalNullifier, claim } = await import("@sharibo/client");
       // Fund round `round` again so this exercises the nullifier-reuse
@@ -1351,7 +1341,14 @@ export default function App() {
       } catch {
         // best-effort refresh only
       }
-      setBusy(null);
+    } catch (e) {
+      if (readCircleStatus() === "claimed") {
+        dispatch({ type: "recordRejection", rejection: toUiError(e, t) });
+      }
+    } finally {
+      if (readCircleStatus() === "claimed") {
+        dispatch({ type: "clearBusy" });
+      }
     }
   }
 
@@ -1376,6 +1373,7 @@ export default function App() {
 
       // Sync with on-chain state after cancellation
       await syncFundingState();
+      dispatch({ type: "clearBusy" });
     } catch (e) {
       setError(formatError(e, t));
     } finally {
@@ -1427,13 +1425,11 @@ export default function App() {
           </div>
           <h1>SHARIBO</h1>
           <p className={styles.tagline}>
-            A private rotating savings circle — on Stellar, with real
-            zero-knowledge proofs.
+            {t("landing.tagline")}
           </p>
           <p className={styles.sub}>
-            Every round, everyone contributes. Every round, one member takes the
-            pot. Sharibo proves <em>who's entitled to claim</em> without ever
-            revealing <em>who</em> claimed.
+            {t("landing.sub.before")} <em>{t("landing.sub.em1")}</em> {t("landing.sub.middle")}{" "}
+            <em>{t("landing.sub.em2")}</em> {t("landing.sub.after")}
           </p>
           <p className={styles.sub}>
             Every round, everyone contributes. Every round, one member takes the
@@ -1480,8 +1476,7 @@ export default function App() {
             </p>
           )}
           <p className={styles.fineprint}>
-            Testnet only. Demo identities are generated fresh in your browser,
-            never reused.
+            {t("landing.testnetFineprint")}
           </p>
           {prevCircle && (
             <p className={styles.fineprint}>
@@ -1495,8 +1490,6 @@ export default function App() {
       </div>
     );
   }
-
-  const step: 0 | 1 | 2 | 3 = claimResult ? 3 : fullyFunded ? 2 : 1;
 
   return (
     <div className={styles.page}>
@@ -1652,7 +1645,7 @@ export default function App() {
                   <input
                     type="radio"
                     checked={claimantIndex === i}
-                    onChange={() => setClaimantIndex(i)}
+                    onChange={() => dispatch({ type: "selectClaimant", index: i })}
                     disabled={!!busy || !!m.ineligible}
                     title={m.ineligible ? m.ineligibleReason ?? "Ineligible to claim" : undefined}
                   />
@@ -1663,6 +1656,7 @@ export default function App() {
             <button className="btn btn-primary" disabled={!online || !!busy} onClick={doClaim}>
               {claimStage ? CLAIM_STAGE_LABELS[claimStage] : "Generate proof & claim"}
             </button>
+            {claimStage && <ClaimProgress stage={claimStage} elapsedSeconds={proveElapsedSeconds} />}
             <ClaimExplainer />
             {busy && (
               <p className={styles.techline}>
@@ -1676,7 +1670,7 @@ export default function App() {
         )}
 
         {claimResult && (
-          <div className={styles.result}>
+          <div className={styles.result} data-testid="claim-result">
             <h2 ref={payoutHeadingRef} tabIndex={-1}>
               {t("result.heading")}
             </h2>

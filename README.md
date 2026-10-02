@@ -229,7 +229,7 @@ Fresh-machine steps, in order. Everything below targets **Stellar testnet only**
 | [Rust](https://rustup.rs/) + `wasm32v1-none` target | rustc **1.94.1** (pinned in rust-toolchain.toml) | `rustc 1.94.1` |
 | [`stellar` CLI](https://developers.stellar.org/docs/tools/cli/install-cli) | **v21.0** (protocol 22 required for BLS12-381 host functions; protocol 23 for `soroban-sdk = "23"`) | `23.4.1` |
 | [Node.js](https://nodejs.org/) | **20.6.0** (`process.loadEnvFile`, used in `scripts/e2e.ts`) | `v24.11.1` |
-| [`circom`](https://docs.circom.io/getting-started/installation/) on `PATH` | **2.1.6** (pragma in `circuits/membership.template.circom`) | `2.2.3` (built from source) |
+| [`circom`](https://docs.circom.io/getting-started/installation/) on `PATH` | **2.1.6** (pragma in `circuits/membership.template.circom`) | `2.2.3` (pinned in `circuits/config.json`, asserted by `compile.sh`) |
 
 `snarkjs` (`0.7.6`) is a devDependency in `circuits/package.json` — no separate global install required; it runs via `npx` during `npm run setup`.
 
@@ -304,7 +304,7 @@ A fast, read-only probe that verifies your deployment is healthy: hits the Sorob
 npm run e2e                                    # full run (default)
 npm run e2e -- --skip-replay                   # stop after the successful claim
 npm run e2e -- --reuse-circle 0                # skip circle creation, run against existing circle 0
-npm run e2e -- --verbose                       # echo each RPC/curl interaction
+npm run e2e -- --verbose                       # echo each RPC/HTTP interaction
 npm run e2e -- --skip-replay --verbose         # combine flags freely
 ```
 
@@ -316,7 +316,7 @@ Runs a full round against testnet for real: creates a 5-member circle, funds it 
 |---|---|
 | `--skip-replay` | Stop after the successful claim (skip round 2 funding + replay check) |
 | `--reuse-circle <id>` | Skip circle creation; run against an existing circle |
-| `--verbose` | Echo each RPC/curl interaction for debugging |
+| `--verbose` | Echo each RPC/HTTP interaction for debugging |
 
 > This script shells out to `curl` for friendbot/Horizon calls rather than using `fetch()` — see `NOTES.md` if you're curious why. Run `npm run e2e` in the foreground when debugging hangs — see [docs/canary.md](docs/canary.md).
 
@@ -376,9 +376,16 @@ We welcome contributions to Sharibo! See [CONTRIBUTING.md](CONTRIBUTING.md) for 
 
 ## Roadmap
 
+There is a detailed mainnet readiness checklist covering audits, trusted setups, and remaining blockers: see [**`docs/mainnet-readiness.md`**](docs/mainnet-readiness.md).
+
 - Funding-side shielding (hide _who_ funded, not just who claimed).
 - Multi-round automation / on-chain turn ordering.
 - Multi-party trusted setup ceremony.
 - Independent audit of the BLS12-381 Poseidon parameters (or a switch to self-generated / better-provenanced constants).
 - Real stablecoin (issued test asset or mainnet equivalent) instead of native testnet XLM.
 - **Selective disclosure ("view key")** — an admin/auditor could prove a circle's _total_ historical contributions (a sum over funding events already visible on-chain) without exposing which individual funded which round. Not built; the shape is in [breakdown §19](full_product_breakdown.md#19-roadmap).
+
+## Handsoff notes
+
+<!-- handsoff-issue-501 -->
+- #501: App.tsx dynamically imports `@sharibo/client` in four handlers while also importing it statically — no split, just noise
