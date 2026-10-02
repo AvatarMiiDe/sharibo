@@ -17,14 +17,10 @@ if (process.env.ANALYZE === "1") {
   }
 }
 
+// https://vite.dev/config/
 export default defineConfig({
   plugins,
   define: {
     global: "globalThis",
-  },
-  test: {
-    environment: "jsdom",
-    setupFiles: ["./src/setupTests.ts"],
-    globals: true,
   },
 });

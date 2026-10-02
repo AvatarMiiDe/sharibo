@@ -932,7 +932,6 @@ code {
     --ring-margin-y: 24px;
   }
 
-@media (max-width: 767px) {
   .page {
     padding: var(--space-xl) var(--space-md);
     align-items: flex-start;

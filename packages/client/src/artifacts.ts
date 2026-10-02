@@ -222,9 +222,11 @@ async function fetchArtifacts(signal?: AbortSignal): Promise<ProverArtifacts> {
     fraction: null,
   });
 
+  const fetchImpl = configuredFetchImpl ?? globalThis.fetch.bind(globalThis);
+
   const [wasmResponse, zkeyResponse] = await Promise.all([
-    fetch(MEMBERSHIP_WASM_URL, { signal }),
-    fetch(MEMBERSHIP_ZKEY_URL, { signal }),
+    fetchImpl(configuredWasmUrl, { signal }),
+    fetchImpl(configuredZkeyUrl, { signal }),
   ]);
 
   let wasmLoaded = 0;
@@ -270,10 +272,18 @@ async function fetchArtifacts(signal?: AbortSignal): Promise<ProverArtifacts> {
 }
 
 /**
- * Background prefetch — called once at module load with no signal so the
- * artifacts are ready by the time the user clicks "Claim". The returned
- * promise is memoised; callers that only need "give me the cached bytes"
- * should call this with no argument.
+ * Explicitly start the background artifact prefetch. This is the public API
+ * the app calls when it wants to warm the prover ahead of the user clicking
+ * "Claim". It intentionally has no side effects at import time.
+ */
+export function startArtifactPrefetch(signal?: AbortSignal): Promise<ProverArtifacts> {
+  return prefetchMembershipArtifacts(signal);
+}
+
+/**
+ * Background prefetch — called explicitly by the app or by the proving path
+ * when we need the bytes cached. The returned promise is memoised; callers
+ * that only need "give me the cached bytes" should call this with no argument.
  *
  * When a signal is provided (e.g. from a React effect cleanup), a *separate*
  * signal-aware fetch is started and returned. This does NOT replace the
@@ -281,52 +291,29 @@ async function fetchArtifacts(signal?: AbortSignal): Promise<ProverArtifacts> {
  * flight its result is still used by the no-signal path.
  */
 export function prefetchMembershipArtifacts(signal?: AbortSignal): Promise<ProverArtifacts> {
-  // Signal-aware callers get their own cancellable promise so an abort does
-  // not poison the shared background cache.
-  if (signal) {
-    return fetchArtifacts(signal).catch((cause: unknown) => {
-      // Don't publish an error for an intentional abort.
-      if (cause instanceof DOMException && cause.name === "AbortError") {
-        throw cause;
-      }
-      const error = cause instanceof Error ? cause : new Error(String(cause));
-      publish({
-        status: "error",
-        loaded: currentProgress.loaded,
-        total: currentProgress.total,
-        fraction: currentProgress.fraction,
-        error,
-      });
-      throw error;
-    });
-  }
-
-  if (!prefetchPromise) {
-    prefetchPromise = fetchArtifacts().catch((cause: unknown) => {
-      const error = cause instanceof Error ? cause : new Error(String(cause));
-      publish({
-        status: "error",
-        loaded: currentProgress.loaded,
-        total: currentProgress.total,
-        fraction: currentProgress.fraction,
-        error,
-      });
-      prefetchPromise = undefined; // allow retry
-      throw error;
-    });
-  }
-  return prefetchPromise;
+  return getDefaultLoader().prefetch(signal);
 }
 
 /**
- * Retrieves the compiled circuit artifacts, prefetching them if not already started.
+ * Subscribes to artifact prefetch progress updates.
  */
-function getArtifacts(): Promise<ProverArtifacts> {
-  return prefetchMembershipArtifacts();
+export function subscribeToArtifactProgress(listener: Listener): () => void {
+  return getDefaultLoader().subscribe(listener);
 }
 
 export function getArtifactPrefetchProgress(): ArtifactPrefetchProgress {
   return currentProgress;
+}
+
+export function __resetForTesting(): void {
+  prefetchPromise = undefined;
+  currentProgress = {
+    status: "idle",
+    loaded: 0,
+    total: null,
+    fraction: null,
+  };
+  listeners.clear();
 }
 
 export function subscribeToArtifactPrefetch(

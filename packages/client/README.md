@@ -1,13 +1,15 @@
 # Sharibo Client SDK
 
-This package provides a TypeScript SDK for interacting with the Sharibo
-contract on Stellar/Soroban.
+This package provides a TypeScript SDK for interacting with the Sharibo contract on Stellar/Soroban.
 
-The primary interface is **`ShariboSDK`** — a facade that binds a network, a
-signer, and a retry policy once, so callers never have to thread a raw
-contract client through their code (see `docs/adr/003-client-boundary.md`).
+> [!NOTE]
+> The package is consumed as built output from the `dist/` directory, not from source. Consumers (like the `app/` workspace) must build this package before running, usually via `npm run build --workspace=packages/client`.
 
-## Quick start
+The primary interface is **`ShariboSDK`** — a facade that binds a network, a signer, and a retry policy once, so callers never have to thread a raw contract client through their code (see `docs/adr/003-client-boundary.md`).
+
+## 1. Connecting
+
+`ShariboSDK.connect` initializes a connected client.
 
 ```ts
 import { ShariboSDK } from "@sharibo/client";
@@ -15,67 +17,41 @@ import { Keypair } from "@stellar/stellar-sdk";
 
 const sdk = await ShariboSDK.connect(
   {
-    contractId: "…",                       // C… 56-char contract id
+    contractId: "CB64...",
     rpcUrl: "https://soroban-testnet.stellar.org",
     networkPassphrase: "Test SDF Network ; September 2015",
   },
-  Keypair.random(),                        // or a wallet-style signer
-  // { retryPolicy: { maxRetries: 5, baseDelayMs: 250 } } // optional
+  Keypair.random(),
+  { retryPolicy: { maxRetries: 3, baseDelayMs: 500 } }
 );
+```
 
-// Create a circle.
+## 2. Creating a Circle
+
+Circles hold shared funds. You can create one by providing a token and initial configuration.
+
+```ts
 const { result: circleId, hash } = await sdk.createCircle({
   admin: sdk.publicKey,
-  token: "…",
+  token: "CDLZ...",
   root: treeRoot,
   contribution: 10_000_000n,
   size: 5,
-  vk,
-});
-
-// Fund it (from any member's own SDK instance).
-await sdk.fund({ circleId, from: memberPublicKey });
-
-// Read state.
-const circle = await sdk.getCircle(circleId);
-const alreadyClaimed = await sdk.hasClaimed(circleId, nullifierHash);
-
-// Claim the pot with a Groth16 proof.
-await sdk.claim({
-  circleId,
-  recipient: freshRecipient,
-  nullifierHash,
-  externalNullifier,
-  proof,
+  vk, // verification key
 });
 ```
 
-### TxResult
+## 3. Funding
 
-State-changing calls (`createCircle`, `fund`, `claim`, `cancelCircle`) resolve
-to a `TxResult<T>`: the decoded contract return value in `result`, plus chain
-metadata from `signAndSend()`.
+Participants fund a circle before it can be claimed.
 
 ```ts
-const { hash, feeCharged, ledger, explorerUrl } = await sdk.claim({ ... });
-
-console.log("tx:", hash);
-if (feeCharged !== undefined) {
-  // feeCharged is bigint stroops at the SDK boundary
-  console.log("fee:", feeCharged.toString());
-}
-if (ledger !== undefined) {
-  console.log("ledger:", ledger);
-}
-// explorerUrl is set when the client was connected with a known passphrase
-if (explorerUrl) {
-  window.open(explorerUrl);
-}
+await sdk.fund({ circleId, from: memberPublicKey });
 ```
 
-Signing a claim still needs a ZK proof. Proving and identity math are separate
-**stateless** free functions on the same package — the SDK is for contract
-interaction only:
+## 4. Generating a Proof
+
+Proof generation runs locally. It does not require a connected SDK, only the free functions.
 
 ```ts
 import { generateIdentity, MerkleTree, generateProof, computeExternalNullifier } from "@sharibo/client";
@@ -86,87 +62,210 @@ const externalNullifier = await computeExternalNullifier(circleId, 0n);
 const { proof, nullifierHash } = await generateProof(input, wasmPath, zkeyPath);
 ```
 
-## Free functions (escape hatch, not the default)
+## 5. Claiming
 
-The SDK is built on a set of free functions (`createCircle`, `fund`, `claim`,
-`getCircle`, `getCircleCount`, `hasClaimed`) that take a raw client, plus
-`connect(config, signer)` which builds that client. They remain exported so
-existing callers and power users can reach past the facade, but **new code
-should use `ShariboSDK`** — the free functions are scheduled for deprecation
-once the SDK covers 100% of their surface (see the JUMP plan in
-`docs/adr/003-client-boundary.md`).
+Submit the locally generated proof to the contract to claim the pot.
+
+```ts
+const { hash, feeCharged } = await sdk.claim({
+  circleId,
+  recipient: freshRecipient,
+  nullifierHash,
+  externalNullifier,
+  proof,
+});
+```
+
+## 6. Reading State
+
+You can inspect the state of a circle or check if a claim has already occurred.
+
+```ts
+const circle = await sdk.getCircle(circleId);
+const alreadyClaimed = await sdk.hasClaimed(circleId, nullifierHash);
+const pot = await sdk.getPot(circleId);
+```
+
+## 7. Handling Errors
+
+The SDK provides specific typed errors for contract rejections (e.g., `AlreadyClaimedError`, `InvalidProofError`).
+For a full list of errors and what they mean, see [docs/errors.md](../../docs/errors.md).
+
+```ts
+import { AlreadyClaimedError, ContractError } from "@sharibo/client";
+
+try {
+  await sdk.claim({ ... });
+} catch (error) {
+  if (error instanceof AlreadyClaimedError) {
+    console.error("Nullifier was already seen by the contract.");
+  } else if (error instanceof ContractError) {
+    console.error("General contract failure:", error.message);
+  }
+}
+```
+
+## 8. Amounts and Addresses
+
+Stellar amounts are handled in Stroops (1 XLM = 10,000,000 Stroops) using `bigint`.
+
+```ts
+import { formatXlm, xlmToStroops, stroopsToXlm } from "@sharibo/client";
+
+const amount = xlmToStroops(1.5); // 15000000n
+console.log(formatXlm(amount));   // "1.5"
+```
+
+## 9. Retries and Observability
+
+Network requests in the Soroban testnet environment can occasionally fail. The SDK handles transient retries automatically. 
+
+```ts
+import { POLL_RETRY_POLICY } from "@sharibo/client";
+
+// Override policy for a specific call:
+const circle = await sdk.getCircle(circleId, POLL_RETRY_POLICY);
+```
+
+To monitor activity (useful for loading spinners), pass an `onEvent` callback when connecting or generating proofs. See [docs/observability.md](../../docs/observability.md) for a full event list.
+
+```ts
+const sdk = await ShariboSDK.connect(config, signer, {
+  onEvent: (event) => console.log("SDK Event:", event.type),
+});
+```
+
+## Internal subpath
+
+`@sharibo/client/internal` exposes non-public helpers for deep integration work (like `FR_MODULUS` or the artifact prefetch machinery). It imports nothing eagerly into the main entrypoint. Importing from it is an explicit opt-in for internal use cases only.
+
+## Node vs browser entry points
+
+The package ships a conditional `exports` map:
+- `browser`: Resolves to `src/index.browser.ts`, which includes background artifact pre-fetching logic.
+- `default` (Node, tests): Resolves to `src/index.ts`, free of side effects and safe for scripts/tests.
+
+---
+
+## Contract client cache
+
+`connect` caches constructed contract clients to avoid fetching the on-chain
+contract spec repeatedly. A signed client's key is the tuple
+`("signed", contractId, rpcUrl, networkPassphrase, signerPublicKey)`; it
+includes the signer's public key because each client retains its signer. A
+read-only client uses `("read-only", contractId, rpcUrl, networkPassphrase)`.
+`onEvent` is not part of either key; each call updates the cached client's event
+handler to that caller's handler.
+
+The cache is an LRU capped at 16 clients. Consumers should call
+`clearContractClientCache()` when the active network changes, after a contract
+redeploy whose spec may have changed, or when they need to discard clients for
+a replaced contract deployment. A new `contractId` naturally creates a distinct
+entry, but clearing also releases old clients. The demo app clears on detected
+Freighter network mismatches and when returning to the landing screen.
 
 ## Public API
 
-The public surface is small and explicit. `index.ts` re-exports exactly the
-values and types below, and a test (`src/index.test.ts`) asserts that this list
-and the barrel agree in both directions. Internal-only symbols (field constants
-like `FR_MODULUS`, the circuit-artifact prefetch machinery) live behind the
-`./internal` subpath and are **not** part of the public API — importing them is
-an explicit opt-in.
+The public surface is small and explicit. `index.ts` re-exports exactly the values and types below, and a test (`src/index.test.ts`) asserts that this list and the barrel agree in both directions.
 
 ### Values
 
 ```ts
-// Identity
-generateIdentity
-poseidon
-randomFieldElement
+AlreadyClaimedError
+CircleCancelledError
+CircleNotFoundError
+ContractError
+DEFAULT_RETRY_POLICY
+EXPLORER_NETWORKS
+InvalidInputError
+InvalidProofError
+MAX_CIRCLE_SIZE
+MerkleTree
+NETWORKS
+OverflowError
+PATIENT_RETRY_POLICY
+POLL_RETRY_POLICY
+ProvingError
+RoundFullError
+RoundNotFundedError
+RpcError
+STROOPS_PER_XLM
+SdkEventEmitter
+ShariboError
+ShariboSDK
+TREE_LEVELS
+WrongRoundTagError
+ZERO_VALUE
+cancelCircle
+claim
+clearContractClientCache
+computeDelay
 computeExternalNullifier
 computeNullifierHash
-
-// Merkle tree
-MerkleTree
-ZERO_VALUE
-TREE_LEVELS
-MAX_CIRCLE_SIZE
-
-// Proving
-generateProof
-verificationKeyToContractFormat
-validateCircuitInput
-verifyProofLocally
-estimateClaimFee
-
-// Contract client
+computeRecipientHash
 connect
+connectReadOnly
 createCircle
-fund
-claim
-getCircle
-getCircleCount
-getRound
-getPot
-getStatus
-getContributors
-hasClaimed
-cancelCircle
+decodeContractError
+describeContractError
+describeError
+encodeG1
+encodeG2
+estimateClaimFee
 explorerTxUrl
-
-// Errors
-ShariboError
-InvalidInputError
-ProvingError
-RpcError
-ContractError
+feToBytes
+formatXlm
+formatXlmDisplay
+fullProve
+fund
+g1ToBytes
+g2ToBytes
+generateIdentity
+generateProof
+getCircle
+getVk
+getCircleCount
+getCircleStatus
+getContributors
+getPot
+getRound
+getStatus
+hasClaimed
+isTestnet
+makeCircleId
+networkOf
+parseContractErrorCode
+populateTxResult
+poseidon
+prove
+randomFieldElement
+resolveSigner
+stroopsToXlm
+validateCircuitInput
+validateContractProof
+validateContractVerificationKey
+verificationKeyToContractFormat
+verifyProofLocally
+withRetry
+xlmToStroops
 ```
 
 ### Types
 
 ```ts
-Identity
-MerkleProof
+CircleView
 CircuitInput
 ContractProof
 ContractVerificationKey
-GenerateProofResult
-ProofResult
-ShariboNetworkConfig
-ShariboClient
-ShariboSigner
 FeeEstimate
+GenerateProofResult
+Identity
+MerkleProof
+ProofResult
+ShariboClient
+ShariboNetworkConfig
+ShariboSigner
 TxResult
-CircleView
 ```
 
 ### Internal subpath
@@ -195,6 +294,8 @@ browser entry automatically. Node and test runners get the side-effect-free defa
 
 If you need the background pre-fetch in a browser app that imports the package
 directly (without a bundler resolving the `browser` condition), call
+`startArtifactPrefetch()` explicitly after import. The progress UI lives in
+the app and subscribes via `subscribeToArtifactPrefetch()`.
 `prefetchMembershipArtifacts()` explicitly after import. The progress UI lives
 in the app and subscribes via `subscribeToArtifactPrefetch()`. Wire the same
 handler into artifact events with `setArtifactOnEvent(onEvent)` or
