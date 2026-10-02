@@ -20,6 +20,39 @@ set working-directory := '.'
 doctor *ARGS:
     npm run doctor --workspace=scripts -- {{ARGS}}
 
+# ── Audit ────────────────────────────────────────────────────────────────────
+
+# Dependency audit gate: npm advisories across every workspace plus cargo
+# advisories / licences / duplicate crates for the contracts crate.
+#
+# Findings are accepted only through the allowlist files below — never by
+# appending `|| true` to a command:
+#
+#   * npm  — `audit-allowlist.json` (root): entries of the form
+#            { "id": "GHSA-…", "reason": "…", "expires": "YYYY-MM-DD" }
+#   * cargo — `contracts/deny.toml` `[advisories] ignore = [...]` entries,
+#            each with a comment giving the reason and an expiry date.
+#
+# An allowlist entry past its expiry is a failure: re-triage the advisory
+# instead of bumping the date.
+audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "== npm audit (all workspaces, --audit-level=high) =="
+    npm audit --audit-level=high
+
+    echo ""
+    echo "== cargo audit (contracts/) =="
+    cd contracts && cargo audit
+
+    echo ""
+    echo "== cargo deny check (advisories, licences, bans, sources) =="
+    cd contracts && cargo deny check
+
+    echo ""
+    echo "audit: no unaccepted findings."
+
 # ── Circuits ──────────────────────────────────────────────────────────────────
 
 # Compile circuit, run trusted setup (with zkey verification), verify the
