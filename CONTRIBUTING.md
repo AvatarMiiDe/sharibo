@@ -229,3 +229,22 @@ Before opening a pull request, run the authoritative local verification gate:
 - The gate intentionally excludes `e2e`, circuit trusted setup (`just circuits`), mutation, and benchmarks — those are slow and/or spend testnet friendbot funds. Run them on demand when your change touches those areas.
 
 If `just ci` passes locally, it's the single documented answer to "did I break anything?" and a good signal your change is ready for review.
+
+## Releases
+
+A release is a git tag plus a `CHANGELOG.md` entry plus the deployment record.
+Every release must accompany (issue #540):
+
+1. A version bump done deliberately: the contract (`contracts/sharibo/Cargo.toml`)
+   and the circuit are the load-bearing artifacts - version those first, then let
+   the TS packages (`package.json` files) follow.
+2. A `CHANGELOG.md` entry (Keep-a-Changelog format) recording schema-version and
+   circuit changes.
+3. A Deployments row in `docs/deployment.md`: tag -> contract ID ->
+   `Circle.schema_version` -> `verification_key.json` SHA-256
+   (`sha256sum circuits/verification_key.json`) -> circom version -> Rust toolchain.
+4. A testnet reset produces a new Deployments row (see `docs/runbook-testnet-reset.md`);
+   never overwrite the previous row - append.
+
+Releases stay manual until there is a reason to automate: release automation on
+a repo with no CI would be premature.
