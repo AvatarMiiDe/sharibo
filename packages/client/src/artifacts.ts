@@ -222,9 +222,11 @@ async function fetchArtifacts(signal?: AbortSignal): Promise<ProverArtifacts> {
     fraction: null,
   });
 
+  const fetchImpl = configuredFetchImpl ?? globalThis.fetch.bind(globalThis);
+
   const [wasmResponse, zkeyResponse] = await Promise.all([
-    fetch(MEMBERSHIP_WASM_URL, { signal }),
-    fetch(MEMBERSHIP_ZKEY_URL, { signal }),
+    fetchImpl(configuredWasmUrl, { signal }),
+    fetchImpl(configuredZkeyUrl, { signal }),
   ]);
 
   let wasmLoaded = 0;
@@ -270,10 +272,18 @@ async function fetchArtifacts(signal?: AbortSignal): Promise<ProverArtifacts> {
 }
 
 /**
- * Background prefetch — called once at module load with no signal so the
- * artifacts are ready by the time the user clicks "Claim". The returned
- * promise is memoised; callers that only need "give me the cached bytes"
- * should call this with no argument.
+ * Explicitly start the background artifact prefetch. This is the public API
+ * the app calls when it wants to warm the prover ahead of the user clicking
+ * "Claim". It intentionally has no side effects at import time.
+ */
+export function startArtifactPrefetch(signal?: AbortSignal): Promise<ProverArtifacts> {
+  return prefetchMembershipArtifacts(signal);
+}
+
+/**
+ * Background prefetch — called explicitly by the app or by the proving path
+ * when we need the bytes cached. The returned promise is memoised; callers
+ * that only need "give me the cached bytes" should call this with no argument.
  *
  * When a signal is provided (e.g. from a React effect cleanup), a *separate*
  * signal-aware fetch is started and returned. This does NOT replace the
@@ -327,6 +337,17 @@ function getArtifacts(): Promise<ProverArtifacts> {
 
 export function getArtifactPrefetchProgress(): ArtifactPrefetchProgress {
   return currentProgress;
+}
+
+export function __resetForTesting(): void {
+  prefetchPromise = undefined;
+  currentProgress = {
+    status: "idle",
+    loaded: 0,
+    total: null,
+    fraction: null,
+  };
+  listeners.clear();
 }
 
 export function subscribeToArtifactPrefetch(
