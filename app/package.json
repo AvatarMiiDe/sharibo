@@ -1,25 +1,9 @@
 {
-  "name": "@sharibo/app",
-  "version": "0.0.0",
+  "name": "app",
   "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "description": "Web frontend for Sharibo ROSCA platform",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/crackedstudio/sharibo.git",
-    "directory": "app"
-  },
-  "keywords": [
-    "stellar",
-    "soroban",
-    "rosca",
-    "react",
-    "frontend"
-  ],
   "scripts": {
-    "sync-circuit": "node scripts/sync-circuit.mjs",
-    "dev:circuits": "node scripts/sync-circuit.mjs --watch",
     "dev": "vite",
     "dev:full": "npm run sync-circuit && vite",
     "build": "npm run sync-circuit && vite build",
