@@ -272,3 +272,6 @@ Bootstrap complete. This script never deploys contracts or spends funds.
 
   Problems? See docs/troubleshooting.md.
 NEXTSTEPS
+
+section "Final prerequisite verdict"
+npm run doctor --workspace=scripts
