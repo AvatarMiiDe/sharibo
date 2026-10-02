@@ -4,6 +4,7 @@ import {
   fund,
   claim,
   getCircle,
+  getVk,
   getCircleCount,
   getStatus,
   hasClaimed,
@@ -119,6 +120,14 @@ export class ShariboSDK {
   /** Reads a circle's current state. Mirrors the `getCircle` free function. */
   getCircle(circleId: bigint, retryPolicy?: RetryPolicy): Promise<CircleView> {
     return getCircle(this.client, circleId, this.policy(retryPolicy));
+  }
+
+  /**
+   * Reads a circle's verification key, cached per (contract, circle) for the
+   * session. Mirrors the `getVk` free function.
+   */
+  getVk(circleId: bigint): Promise<ContractVerificationKey> {
+    return getVk(this.client, circleId, this.retryPolicy);
   }
 
   /** Pure read: how many circles have been created on this contract. */

@@ -318,6 +318,7 @@ fn expected_external_nullifier(env: &Env, circle_id: u64, round: u32) -> Fr {
 struct Setup {
     env: Env,
     client_id: Address,
+    admin: Address,
     token: Address,
     members: StdVec<Address>,
     circle_id: u64,
@@ -355,6 +356,7 @@ fn setup(size: u32, contribution: i128) -> Setup {
     Setup {
         env,
         client_id: contract_id,
+        admin,
         token,
         members,
         circle_id,
@@ -404,6 +406,7 @@ fn setup_with_fee(size: u32, contribution: i128, fee_bps: u32) -> (Setup, Addres
     let setup = Setup {
         env,
         client_id: contract_id,
+        admin,
         token,
         members,
         circle_id,
@@ -1377,6 +1380,112 @@ fn get_contributors_unknown_reverts() {
     let s = setup(5, 100);
     let client = ContractClient::new(&s.env, &s.client_id);
     client.get_contributors(&999u64);
+}
+
+#[test]
+fn get_circle_meta_returns_mutable_fields() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+
+    let meta = client.get_circle_meta(&s.circle_id);
+    assert_eq!(meta.schema_version, 2);
+    assert_eq!(meta.admin, s.admin);
+    assert_eq!(meta.token, s.token);
+    assert_eq!(meta.contribution, s.contribution);
+    assert_eq!(meta.size, s.size);
+    assert_eq!(meta.round, 0);
+    assert_eq!(meta.pot, 0i128);
+    assert!(!meta.cancelled);
+    assert_eq!(meta.fee_bps, 0u32);
+
+    // Funding moves pot; the meta read reflects it without a second call.
+    client.fund(&s.circle_id, &s.members[0]);
+    let meta_after = client.get_circle_meta(&s.circle_id);
+    assert_eq!(meta_after.pot, s.contribution);
+    assert_eq!(meta_after.round, 0);
+}
+
+#[test]
+fn get_circle_meta_has_no_group_elements() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+
+    let circle = client.get_circle(&s.circle_id);
+    let meta = client.get_circle_meta(&s.circle_id);
+
+    let circle_xdr = circle.clone().to_xdr(&s.env);
+    let meta_xdr = meta.to_xdr(&s.env);
+
+    // The full Circle embeds the VK (alpha + 3×G2 + 5×G1 points) and the
+    // contributors vector; the meta view must be dramatically smaller.
+    assert!(
+        meta_xdr.len() < circle_xdr.len() / 2,
+        "CircleMeta XDR ({}) should be far smaller than Circle XDR ({}) — \
+         the verification key must not be embedded",
+        meta_xdr.len(),
+        circle_xdr.len(),
+    );
+
+    // No BLS12-381 group element from the VK may appear in the meta encoding.
+    // G1Affine/G2Affine don't implement PartialEq, so compare serialised bytes.
+    for point in [
+        circle.vk.alpha.to_xdr(&s.env),
+        circle.vk.beta.to_xdr(&s.env),
+        circle.vk.gamma.to_xdr(&s.env),
+        circle.vk.delta.to_xdr(&s.env),
+    ] {
+        let needle: StdVec<u8> = point.iter().collect();
+        let haystack: StdVec<u8> = meta_xdr.iter().collect();
+        assert!(
+            !haystack.windows(needle.len()).any(|w| w == needle.as_slice()),
+            "CircleMeta XDR contains a VK group element — get_circle_meta must not \
+             return the verification key",
+        );
+    }
+    for ic_point in circle.vk.ic.iter() {
+        let needle: StdVec<u8> = ic_point.to_xdr(&s.env).iter().collect();
+        let haystack: StdVec<u8> = meta_xdr.iter().collect();
+        assert!(
+            !haystack.windows(needle.len()).any(|w| w == needle.as_slice()),
+            "CircleMeta XDR contains a VK ic point — get_circle_meta must not \
+             return the verification key",
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")] // CircleNotFound
+fn get_circle_meta_unknown_reverts() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+    client.get_circle_meta(&999u64);
+}
+
+#[test]
+fn get_vk_returns_committed_verification_key() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+
+    let circle = client.get_circle(&s.circle_id);
+    let vk = client.get_vk(&s.circle_id);
+
+    // G1Affine/G2Affine don't implement PartialEq — compare serialised bytes.
+    assert_eq!(vk.alpha.to_xdr(&s.env), circle.vk.alpha.to_xdr(&s.env), "alpha");
+    assert_eq!(vk.beta.to_xdr(&s.env), circle.vk.beta.to_xdr(&s.env), "beta");
+    assert_eq!(vk.gamma.to_xdr(&s.env), circle.vk.gamma.to_xdr(&s.env), "gamma");
+    assert_eq!(vk.delta.to_xdr(&s.env), circle.vk.delta.to_xdr(&s.env), "delta");
+    assert_eq!(vk.ic.len(), circle.vk.ic.len(), "ic length");
+    for (got, want) in vk.ic.iter().zip(circle.vk.ic.iter()) {
+        assert_eq!(got.to_xdr(&s.env), want.to_xdr(&s.env), "ic point");
+    }
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")] // CircleNotFound
+fn get_vk_unknown_reverts() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+    client.get_vk(&999u64);
 }
 
 // CPU-instruction harness: measures create_circle / fund / claim, plus a

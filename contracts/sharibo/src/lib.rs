@@ -77,8 +77,8 @@ pub struct Proof {
 /// - A bump requires either a migration function (reading the old layout,
 ///   writing the new one) or an explicit "testnet-reset" note in the release
 ///   commit message.
-/// - A golden-XDR test in `test.rs` (`circle_xdr_layout_golden`) will fail if
-///   the serialised layout changes without a deliberate version bump, making
+/// - The golden-XDR tests in `test.rs` (`mod xdr_golden`) will fail if the
+///   serialised layout changes without a deliberate version bump, making
 ///   accidental breakage impossible to land unnoticed.
 ///
 /// Current version: **2** (adds `fee_bps`/`fee_recipient` — breaking, needs
@@ -180,6 +180,58 @@ pub struct Circle {
     /// [`Contract::claim`]. Must not be the contract's own address when
     /// `fee_bps > 0` (enforced at creation — mirror of the `claim` recipient
     /// guard); ignored when `fee_bps == 0`. Immutable after creation.
+    pub fee_recipient: Address,
+}
+
+/// Lightweight, poll-friendly view of a [`Circle`]'s mutable/small fields.
+///
+/// Returned by [`Contract::get_circle_meta`] for callers that track funding
+/// progress or round advancement (e.g. a UI polling loop). Deliberately
+/// excludes:
+///
+/// - the immutable [`VerificationKey`] — committed at creation and never
+///   changed, fetch it once via [`Contract::get_vk`] and cache it;
+/// - the growable `contributors` / `nullifiers` vectors — already served by
+///   [`Contract::get_contributors`] and [`Contract::has_claimed`].
+///
+/// On BLS12-381 the embedded VK alone serialises to several hundred bytes
+/// (48 bytes per G1 point, 96 per G2 point, plus 5 G1 points in `ic`), so
+/// returning it on every poll dominates RPC payload size for data that never
+/// changes.
+#[contracttype]
+#[derive(Clone)]
+pub struct CircleMeta {
+    /// Schema version for this stored struct. Mirrors [`Circle::schema_version`].
+    pub schema_version: u32,
+    /// Owner of the circle. See [`Circle::admin`].
+    pub admin: Address,
+    /// SAC token contract used for contributions and payouts. See
+    /// [`Circle::token`].
+    pub token: Address,
+    /// Merkle root of the member-commitment tree. See [`Circle::root`].
+    pub root: Fr,
+    /// Amount each [`Contract::fund`] call deposits into [`Circle::pot`].
+    /// See [`Circle::contribution`].
+    pub contribution: i128,
+    /// Number of funders required to fill a round. See [`Circle::size`].
+    pub size: u32,
+    /// Current round number. See [`Circle::round`].
+    pub round: u32,
+    /// Tokens deposited for the **current** round. See [`Circle::pot`].
+    pub pot: i128,
+    /// True once `cancel_circle` has been called. See [`Circle::cancelled`].
+    pub cancelled: bool,
+    /// Number of ledgers each round is allowed to stay open before any
+    /// contributor may call `expire_round`. See
+    /// [`Circle::round_deadline_ledgers`].
+    pub round_deadline_ledgers: u32,
+    /// The ledger sequence number at which the current round began. See
+    /// [`Circle::round_started_ledger`].
+    pub round_started_ledger: u32,
+    /// Protocol fee in basis points. See [`Circle::fee_bps`].
+    pub fee_bps: u32,
+    /// Address that receives the fee deduction on every claim. See
+    /// [`Circle::fee_recipient`].
     pub fee_recipient: Address,
 }
 
@@ -748,11 +800,80 @@ impl Contract {
     /// A full [`Circle`] struct (including the embedded [`VerificationKey`]
     /// and current-round [`Circle::contributors`]).
     ///
+    /// # Polling callers
+    ///
+    /// The embedded [`VerificationKey`] is committed at creation and
+    /// immutable, yet serialises to several hundred bytes of BLS12-381 group
+    /// elements on every call. Callers that poll funding state (e.g. a UI
+    /// progress loop) should prefer [`Self::get_circle_meta`], fetching the
+    /// VK once via [`Self::get_vk`] instead.
+    ///
     /// # Errors
     ///
     /// * [`Error::CircleNotFound`] — no circle stored at `circle_id`.
     pub fn get_circle(env: Env, circle_id: u64) -> Circle {
         load_circle(&env, circle_id)
+    }
+
+    /// Lightweight read of a circle's mutable/small fields — the poll-friendly
+    /// alternative to [`Self::get_circle`].
+    ///
+    /// Returns a [`CircleMeta`] that deliberately excludes the embedded
+    /// [`VerificationKey`] (committed at creation and immutable — fetch it
+    /// once via [`Self::get_vk`]) and the `contributors`/`nullifiers` vectors
+    /// (already served by [`Self::get_contributors`] and
+    /// [`Self::has_claimed`]).
+    ///
+    /// # Authentication
+    ///
+    /// None — pure read, available to any caller.
+    ///
+    /// # Arguments
+    ///
+    /// * `circle_id` — id returned from [`Self::create_circle`].
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::CircleNotFound`] — no circle stored at `circle_id`.
+    pub fn get_circle_meta(env: Env, circle_id: u64) -> CircleMeta {
+        let circle = load_circle(&env, circle_id);
+        CircleMeta {
+            schema_version: circle.schema_version,
+            admin: circle.admin,
+            token: circle.token,
+            root: circle.root,
+            contribution: circle.contribution,
+            size: circle.size,
+            round: circle.round,
+            pot: circle.pot,
+            cancelled: circle.cancelled,
+            round_deadline_ledgers: circle.round_deadline_ledgers,
+            round_started_ledger: circle.round_started_ledger,
+            fee_bps: circle.fee_bps,
+            fee_recipient: circle.fee_recipient,
+        }
+    }
+
+    /// Pure read: the circle's Groth16 [`VerificationKey`].
+    ///
+    /// The VK is committed at creation and never changes, so clients should
+    /// fetch it **once** and cache it (e.g. per `(contract_id, circle_id)`)
+    /// rather than polling it. Use [`Self::get_circle_meta`] for the
+    /// poll-friendly view of the remaining state.
+    ///
+    /// # Authentication
+    ///
+    /// None — pure read, available to any caller.
+    ///
+    /// # Arguments
+    ///
+    /// * `circle_id` — id returned from [`Self::create_circle`].
+    ///
+    /// # Errors
+    ///
+    /// * [`Error::CircleNotFound`] — no circle stored at `circle_id`.
+    pub fn get_vk(env: Env, circle_id: u64) -> VerificationKey {
+        load_circle(&env, circle_id).vk
     }
 
     /// Pure read: the current count of circles ever created (i.e. the next

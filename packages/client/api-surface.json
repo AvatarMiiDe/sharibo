@@ -60,6 +60,7 @@
     "getPot": "function",
     "getRound": "function",
     "getStatus": "function",
+    "getVk": "function",
     "hasClaimed": "function",
     "startArtifactPrefetch": "function",
     "poseidon": "function",

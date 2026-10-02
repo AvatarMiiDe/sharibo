@@ -732,12 +732,12 @@ export default function App() {
     const adminKey = current.admin;
     const id = current.circleId;
     try {
-      const { connect, getCircle } = await import("@sharibo/client");
+      const { connect, getCircle, getContributors } = await import("@sharibo/client");
       const adminClient = await connect(NETWORK, admin);
       const circle = await getCircle(adminClient, circleId, POLL_RETRY_POLICY);
 
       setPot(circle.pot);
-      setOnChainContributors(circle.contributors);
+      setOnChainContributors(contributors);
       setCancelled(circle.cancelled);
       setFeeBps(circle.fee_bps ?? 0);
       setFeeRecipient(circle.fee_recipient ?? "");

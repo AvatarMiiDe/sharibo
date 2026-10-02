@@ -90,8 +90,28 @@ export function resolveSigner(
 
 const contractClientCache = new Map<string, Promise<ShariboClient>>();
 
+/**
+ * Cache of fetched verification keys, keyed by `${contractId}:${circleId}`.
+ *
+ * The VK is committed at circle creation and never changes, so it is fetched
+ * at most once per circle per session (see {@link getVk}). Cleared alongside
+ * the contract-client cache so a network/contract switch invalidates it.
+ */
+const vkCache = new Map<string, ContractVerificationKey>();
+
 export function clearContractClientCache(): void {
   contractClientCache.clear();
+  vkCache.clear();
+}
+
+/**
+ * Best-effort extraction of the contract id a client was built for, used to
+ * key {@link vkCache}. Falls back to an empty string for clients that don't
+ * expose their options (e.g. hand-rolled test doubles).
+ */
+function contractIdOf(client: ShariboClient): string {
+  const options = (client as { options?: { contractId?: unknown } } | undefined)?.options;
+  return typeof options?.contractId === "string" ? options.contractId : "";
 }
 
 export async function connect(
@@ -473,6 +493,10 @@ export async function claim(
 /**
  * A view of a Sharibo circle's state.
  *
+ * Mirrors the contract's `CircleMeta`: the mutable/small fields, without the
+ * embedded verification key or the contributors vector. Use {@link getVk}
+ * for the one-time VK fetch and {@link getContributors} for the funder list.
+ *
  * @property admin - The admin address for the circle.
  * @property token - The token address for contributions.
  * @property root - The Merkle tree root of identity commitments.
@@ -480,7 +504,9 @@ export async function claim(
  * @property size - The maximum number of participants.
  * @property round - The current round number.
  * @property pot - The total amount in the prize pot.
- * @property contributors - Addresses that have funded the current round in order.
+ * @property vk - The Groth16 verification key. Optional: only populated when
+ *   the caller has explicitly fetched it via {@link getVk} and attached it;
+ *   the poll-friendly {@link getCircle} read never returns it.
  * @property cancelled - Whether the circle has been cancelled.
  * @property fee_bps - The protocol fee in basis points (0-10_000; 0 = no fee).
  * @property fee_recipient - The address the protocol fee is paid to.
@@ -493,8 +519,7 @@ export interface CircleView {
   size: number;
   round: number;
   pot: bigint;
-  vk: ContractVerificationKey;
-  contributors: string[];
+  vk?: ContractVerificationKey;
   cancelled: boolean;
   fee_bps: number;
   fee_recipient: string;
@@ -503,6 +528,9 @@ export interface CircleView {
 /**
  * Retrieves the current state of a circle.
  *
+ * Backed by the contract's `get_circle_meta` read, which excludes the
+ * verification key (committed at creation and immutable — fetch it once via
+ * {@link getVk}) and the contributors vector (see {@link getContributors}).
  * Uses simulation only — no transaction is submitted, no fee is charged, and
  * no funded keypair is required.  Pass a client from {@link connectReadOnly}
  * (or any signed client; signing is simply ignored for view calls).
@@ -516,12 +544,47 @@ export async function getCircle(
   circleId: bigint,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<CircleView> {
-  // get_circle is a pure read: the SDK detects no signature is needed and
+  // get_circle_meta is a pure read: the SDK detects no signature is needed and
   // refuses signAndSend() without `force` (there's nothing to sign/submit).
   try {
-    const tx: ContractTx = await withRetry(() => client.get_circle({ circle_id: circleId }), retryPolicy, client.emitter);
+    const tx: ContractTx = await withRetry(() => client.get_circle_meta({ circle_id: circleId }), retryPolicy, client.emitter);
     // Pure read — take the simulated result rather than submitting a tx (#279).
     return tx.result as CircleView;
+  } catch (err) {
+    throw decodeContractError(err);
+  }
+}
+
+/**
+ * Retrieves a circle's Groth16 verification key.
+ *
+ * The VK is committed at circle creation and never changes, so the result is
+ * cached per `(contractId, circleId)` for the lifetime of the session —
+ * repeated calls for the same circle are served from the cache and perform no
+ * RPC. Call {@link clearContractClientCache} to invalidate.
+ *
+ * Uses simulation only — no transaction is submitted, no fee is charged, and
+ * no funded keypair is required.
+ *
+ * @param client - The Sharibo contract client.
+ * @param circleId - The ID of the circle to query.
+ * @returns The circle's verification key.
+ */
+export async function getVk(
+  client: ShariboClient,
+  circleId: bigint,
+  retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
+): Promise<ContractVerificationKey> {
+  const cacheKey = `${contractIdOf(client)}:${circleId}`;
+  const cached = vkCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+  try {
+    const tx: ContractTx = await withRetry(() => client.get_vk({ circle_id: circleId }), retryPolicy, client.emitter);
+    const vk = tx.result as ContractVerificationKey;
+    vkCache.set(cacheKey, vk);
+    return vk;
   } catch (err) {
     throw decodeContractError(err);
   }
@@ -541,16 +604,25 @@ export interface CircleStatus {
   cancelled: boolean;
 }
 
-/** Pure read: the funding-progress slice of a circle's on-chain state. */
+/**
+ * Pure read: the funding-progress slice of a circle's on-chain state.
+ *
+ * Composes the cheap `get_circle_meta` and `get_contributors` reads rather
+ * than the heavyweight `get_circle`, so polling never transfers the
+ * verification key.
+ */
 export async function getCircleStatus(
   client: ShariboClient,
   circleId: bigint,
   retryPolicy: RetryPolicy = DEFAULT_RETRY_POLICY,
 ): Promise<CircleStatus> {
-  const circle = await getCircle(client, circleId, retryPolicy);
+  const [circle, contributors] = await Promise.all([
+    getCircle(client, circleId, retryPolicy),
+    getContributors(client, circleId),
+  ]);
   return {
     pot: circle.pot,
-    contributors: circle.contributors ?? [],
+    contributors,
     round: circle.round,
     cancelled: circle.cancelled,
   };

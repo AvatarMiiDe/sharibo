@@ -6,6 +6,7 @@ import * as url from "node:url";
 import { xdr, scValToNative } from "@stellar/stellar-sdk";
 import { fund, populateTxResult } from "./contract.js";
 import { DEFAULT_RETRY_POLICY } from "./retry.js";
+import type { ContractVerificationKey } from "./prove.js";
 
 /** Committed fixture: shape of a real `signAndSend()` success payload from the SDK. */
 const SIGN_AND_SEND_FIXTURE = {

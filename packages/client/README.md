@@ -206,6 +206,7 @@ g2ToBytes
 generateIdentity
 generateProof
 getCircle
+getVk
 getCircleCount
 getCircleStatus
 getContributors
