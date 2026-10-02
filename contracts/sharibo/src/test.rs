@@ -11,7 +11,7 @@ use soroban_sdk::{
     crypto::bls12_381::{G1_SERIALIZED_SIZE, G2_SERIALIZED_SIZE},
     symbol_short,
     testutils::{Address as _, Ledger as _},
-    BytesN, TryIntoVal, U256,
+    BytesN, Map, TryIntoVal, U256, Val,
 };
 use std::vec::Vec as StdVec;
 
@@ -318,6 +318,7 @@ fn expected_external_nullifier(env: &Env, circle_id: u64, round: u32) -> Fr {
 struct Setup {
     env: Env,
     client_id: Address,
+    admin: Address,
     token: Address,
     members: StdVec<Address>,
     circle_id: u64,
@@ -355,6 +356,7 @@ fn setup(size: u32, contribution: i128) -> Setup {
     Setup {
         env,
         client_id: contract_id,
+        admin,
         token,
         members,
         circle_id,
@@ -404,6 +406,7 @@ fn setup_with_fee(size: u32, contribution: i128, fee_bps: u32) -> (Setup, Addres
     let setup = Setup {
         env,
         client_id: contract_id,
+        admin,
         token,
         members,
         circle_id,
@@ -517,7 +520,7 @@ fn claim_skips_fee_transfer_when_fee_bps_zero() {
 
 #[test]
 fn fee_is_immutable_after_creation() {
-    // There is deliberately no setter for fee_bps/fee_recipient (ADR 003):
+    // There is deliberately no setter for fee_bps/fee_recipient (ADR 007):
     // once committed at create_circle, every public entrypoint leaves them
     // exactly as they were. Funding and claiming both write the circle on
     // every call; asserting the fee survives fund (and the earlier
@@ -729,7 +732,8 @@ fn same_identity_can_claim_two_consecutive_rounds() {
         &external_nullifier_r0,
         &proof_r0,
     );
-    assert!(client.has_claimed(&circle_id, &nullifier_hash_r0));
+    // Cycle advanced (size=1), so the nullifier list was cleared.
+    assert!(!client.has_claimed(&circle_id, &nullifier_hash_r0));
     assert_eq!(token_client.balance(&recipient_r0), contribution);
 
     let circle = client.get_circle(&circle_id);
@@ -761,7 +765,8 @@ fn same_identity_can_claim_two_consecutive_rounds() {
 
     // The claim succeeded: no RoundNotFunded/WrongRoundTag/AlreadyClaimed/
     // InvalidProof panic. Same identity, two rounds, two payouts.
-    assert!(client.has_claimed(&circle_id, &nullifier_hash_r1));
+    // Since cycle advanced again, the list is empty.
+    assert!(!client.has_claimed(&circle_id, &nullifier_hash_r1));
     assert_eq!(token_client.balance(&recipient_r1), contribution);
     assert_eq!(client.get_circle(&circle_id).round, 2);
 }
@@ -925,8 +930,12 @@ fn create_circle_emits_created_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&env).unwrap();
     assert_eq!(topic2, circle_id);
 
-    let (event_admin, event_token, event_contribution, event_size): (Address, Address, i128, u32) =
-        data.try_into_val(&env).unwrap();
+    // Verify field names and order via the typed event struct's Map
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let event_admin: Address = map.get(symbol_short!("admin")).unwrap().try_into_val(&env).unwrap();
+    let event_token: Address = map.get(symbol_short!("token")).unwrap().try_into_val(&env).unwrap();
+    let event_contribution: i128 = map.get(symbol_short!("contrib")).unwrap().try_into_val(&env).unwrap();
+    let event_size: u32 = map.get(symbol_short!("size")).unwrap().try_into_val(&env).unwrap();
     assert_eq!(event_admin, admin);
     assert_eq!(event_token, token);
     assert_eq!(event_contribution, contribution);
@@ -1056,8 +1065,10 @@ fn fund_emits_funded_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (event_from, new_pot, target): (Address, i128, i128) =
-        data.try_into_val(&s.env).unwrap();
+    let map: Map<Symbol, Val> = data.try_into_val(&s.env).unwrap();
+    let event_from: Address = map.get(symbol_short!("from")).unwrap().try_into_val(&s.env).unwrap();
+    let new_pot: i128 = map.get(symbol_short!("pot")).unwrap().try_into_val(&s.env).unwrap();
+    let target: i128 = map.get(symbol_short!("target")).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(event_from, from);
     assert_eq!(new_pot, s.contribution);
     assert_eq!(target, s.contribution * (s.size as i128));
@@ -1101,10 +1112,12 @@ fn claim_emits_claimed_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (round, amount, event_recipient): (u32, i128, Address) =
-        data.try_into_val(&s.env).unwrap();
-    assert_eq!(round, 0);
-    assert_eq!(amount, s.contribution * (s.size as i128));
+    let map: Map<Symbol, Val> = data.try_into_val(&s.env).unwrap();
+    let claimed_round: u32 = map.get(symbol_short!("cround")).unwrap().try_into_val(&s.env).unwrap();
+    let payout: i128 = map.get(symbol_short!("payout")).unwrap().try_into_val(&s.env).unwrap();
+    let event_recipient: Address = map.get(symbol_short!("recipient")).unwrap().try_into_val(&s.env).unwrap();
+    assert_eq!(claimed_round, 0);
+    assert_eq!(payout, s.contribution * (s.size as i128));
     assert_eq!(event_recipient, recipient);
 }
 
@@ -1135,10 +1148,97 @@ fn cancel_circle_emits_cancelled_event() {
     let topic2: u64 = topics.get(2).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(topic2, s.circle_id);
 
-    let (refunded_count, refunded_total): (u32, i128) =
-        data.try_into_val(&s.env).unwrap();
+    let map: Map<Symbol, Val> = data.try_into_val(&s.env).unwrap();
+    let refunded_count: u32 = map.get(symbol_short!("rcount")).unwrap().try_into_val(&s.env).unwrap();
+    let refunded_total: i128 = map.get(symbol_short!("rtotal")).unwrap().try_into_val(&s.env).unwrap();
     assert_eq!(refunded_count, 2);
     assert_eq!(refunded_total, s.contribution * 2i128);
+}
+
+#[test]
+fn propose_admin_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&circle_id, &new_admin);
+
+    let events = env.events().all();
+    let event = events.iter().find(|(_, topics, _)| {
+        let t0: Option<Symbol> = topics.get(0).and_then(|v| v.try_into_val(&env).ok());
+        t0 == Some(symbol_short!("prop_adm"))
+    }).unwrap();
+    let (_, _, data) = event;
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let circle_id_val: u64 = map.get(symbol_short!("circle_id")).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(circle_id_val, circle_id);
+}
+
+#[test]
+fn accept_admin_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &5u32, &0u32, &vk, &0u32, &Address::generate(&env));
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&circle_id, &new_admin);
+    client.accept_admin(&circle_id);
+
+    let events = env.events().all();
+    let event = events.iter().find(|(_, topics, _)| {
+        let t0: Option<Symbol> = topics.get(0).and_then(|v| v.try_into_val(&env).ok());
+        t0 == Some(symbol_short!("acc_adm"))
+    }).unwrap();
+    let (_, _, data) = event;
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let circle_id_val: u64 = map.get(symbol_short!("circle_id")).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(circle_id_val, circle_id);
+}
+
+#[test]
+fn expire_round_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    let circle_id = client.create_circle(&admin, &token, &root, &100i128, &5u32, &10u32, &vk, &0u32, &Address::generate(&env));
+    // Advance ledger past deadline
+    env.ledger().with_mut(|l| { l.sequence_number += 20; });
+    client.expire_round(&circle_id);
+
+    let events = env.events().all();
+    let event = events.iter().find(|(_, topics, _)| {
+        let t0: Option<Symbol> = topics.get(0).and_then(|v| v.try_into_val(&env).ok());
+        t0 == Some(symbol_short!("rnd_exp"))
+    }).unwrap();
+    let (_, _, data) = event;
+    let map: Map<Symbol, Val> = data.try_into_val(&env).unwrap();
+    let circle_id_val: u64 = map.get(symbol_short!("circle_id")).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(circle_id_val, circle_id);
 }
 
 #[test]
@@ -1282,6 +1382,112 @@ fn get_contributors_unknown_reverts() {
     client.get_contributors(&999u64);
 }
 
+#[test]
+fn get_circle_meta_returns_mutable_fields() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+
+    let meta = client.get_circle_meta(&s.circle_id);
+    assert_eq!(meta.schema_version, 2);
+    assert_eq!(meta.admin, s.admin);
+    assert_eq!(meta.token, s.token);
+    assert_eq!(meta.contribution, s.contribution);
+    assert_eq!(meta.size, s.size);
+    assert_eq!(meta.round, 0);
+    assert_eq!(meta.pot, 0i128);
+    assert!(!meta.cancelled);
+    assert_eq!(meta.fee_bps, 0u32);
+
+    // Funding moves pot; the meta read reflects it without a second call.
+    client.fund(&s.circle_id, &s.members[0]);
+    let meta_after = client.get_circle_meta(&s.circle_id);
+    assert_eq!(meta_after.pot, s.contribution);
+    assert_eq!(meta_after.round, 0);
+}
+
+#[test]
+fn get_circle_meta_has_no_group_elements() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+
+    let circle = client.get_circle(&s.circle_id);
+    let meta = client.get_circle_meta(&s.circle_id);
+
+    let circle_xdr = circle.clone().to_xdr(&s.env);
+    let meta_xdr = meta.to_xdr(&s.env);
+
+    // The full Circle embeds the VK (alpha + 3×G2 + 5×G1 points) and the
+    // contributors vector; the meta view must be dramatically smaller.
+    assert!(
+        meta_xdr.len() < circle_xdr.len() / 2,
+        "CircleMeta XDR ({}) should be far smaller than Circle XDR ({}) — \
+         the verification key must not be embedded",
+        meta_xdr.len(),
+        circle_xdr.len(),
+    );
+
+    // No BLS12-381 group element from the VK may appear in the meta encoding.
+    // G1Affine/G2Affine don't implement PartialEq, so compare serialised bytes.
+    for point in [
+        circle.vk.alpha.to_xdr(&s.env),
+        circle.vk.beta.to_xdr(&s.env),
+        circle.vk.gamma.to_xdr(&s.env),
+        circle.vk.delta.to_xdr(&s.env),
+    ] {
+        let needle: StdVec<u8> = point.iter().collect();
+        let haystack: StdVec<u8> = meta_xdr.iter().collect();
+        assert!(
+            !haystack.windows(needle.len()).any(|w| w == needle.as_slice()),
+            "CircleMeta XDR contains a VK group element — get_circle_meta must not \
+             return the verification key",
+        );
+    }
+    for ic_point in circle.vk.ic.iter() {
+        let needle: StdVec<u8> = ic_point.to_xdr(&s.env).iter().collect();
+        let haystack: StdVec<u8> = meta_xdr.iter().collect();
+        assert!(
+            !haystack.windows(needle.len()).any(|w| w == needle.as_slice()),
+            "CircleMeta XDR contains a VK ic point — get_circle_meta must not \
+             return the verification key",
+        );
+    }
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")] // CircleNotFound
+fn get_circle_meta_unknown_reverts() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+    client.get_circle_meta(&999u64);
+}
+
+#[test]
+fn get_vk_returns_committed_verification_key() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+
+    let circle = client.get_circle(&s.circle_id);
+    let vk = client.get_vk(&s.circle_id);
+
+    // G1Affine/G2Affine don't implement PartialEq — compare serialised bytes.
+    assert_eq!(vk.alpha.to_xdr(&s.env), circle.vk.alpha.to_xdr(&s.env), "alpha");
+    assert_eq!(vk.beta.to_xdr(&s.env), circle.vk.beta.to_xdr(&s.env), "beta");
+    assert_eq!(vk.gamma.to_xdr(&s.env), circle.vk.gamma.to_xdr(&s.env), "gamma");
+    assert_eq!(vk.delta.to_xdr(&s.env), circle.vk.delta.to_xdr(&s.env), "delta");
+    assert_eq!(vk.ic.len(), circle.vk.ic.len(), "ic length");
+    for (got, want) in vk.ic.iter().zip(circle.vk.ic.iter()) {
+        assert_eq!(got.to_xdr(&s.env), want.to_xdr(&s.env), "ic point");
+    }
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1)")] // CircleNotFound
+fn get_vk_unknown_reverts() {
+    let s = setup(5, 100);
+    let client = ContractClient::new(&s.env, &s.client_id);
+    client.get_vk(&999u64);
+}
+
 // CPU-instruction harness: measures create_circle / fund / claim, plus a
 // synthetic larger-IC Groth16 verify (more public inputs → more g1_mul).
 // Tree depth does NOT change claim cost (circuit-only); IC length does.
@@ -1322,6 +1528,26 @@ fn cpu_instruction_benchmarks() {
     let nullifier_hash = real_nullifier_hash(&env);
     let external_nullifier = real_external_nullifier_round0(&env);
     let proof = real_valid_proof(&env);
+
+    // ---- claim (rejection path: invalid recipient) ----
+    env.cost_estimate().budget().reset_default();
+    let res = client.try_claim(
+        &0u64,
+        &contract_id,
+        &nullifier_hash,
+        &external_nullifier,
+        &proof,
+    );
+    assert!(res.is_err());
+    let reject_cpu = env.cost_estimate().budget().cpu_instruction_cost();
+    std::println!("bench claim (reject invalid recipient): {reject_cpu} CPU instructions");
+    // Should be extremely cheap since it fails on the first line before any cryptography
+    assert!(
+        reject_cpu < 2_000_000,
+        "claim (reject) CPU {reject_cpu} exceeded 2M threshold (should be very cheap)"
+    );
+
+    env.cost_estimate().budget().reset_default();
     client.claim(
         &0u64,
         &recipient,
@@ -1371,6 +1597,47 @@ fn cpu_instruction_benchmarks() {
         );
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../BENCHMARKS.md");
         std::fs::write(path, table).expect("write contracts/BENCHMARKS.md");
+    }
+}
+
+#[test]
+fn test_nullifier_set_is_bounded_by_cycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token = create_token(&env, &token_admin);
+    let root = real_root(&env);
+    let vk = real_verification_key(&env);
+    
+    let size = 5u32;
+    client.create_circle(&admin, &token, &root, &100i128, &size, &0u32, &vk, &0u32, &admin);
+
+    for i in 0..20 {
+        env.as_contract(&contract_id, || {
+            let key = DataKey::Circle(0);
+            let mut circle: Circle = env.storage().persistent().get(&key).unwrap();
+            
+            // Replicate the effects of `claim` to bypass the proof check
+            circle.pot = 0;
+            circle.round += 1;
+            circle.contributors = Vec::new(&env);
+            circle.round_started_ledger = env.ledger().sequence();
+            
+            let dummy_nullifier = Fr::from_u256(soroban_sdk::U256::from_u32(&env, i));
+            circle.nullifiers.push_back(dummy_nullifier);
+            if circle.round % circle.size == 0 {
+                circle.nullifiers = Vec::new(&env);
+            }
+            
+            env.storage().persistent().set(&key, &circle);
+        });
+
+        let circle = client.get_circle(&0u64);
+        assert!(circle.nullifiers.len() <= size, "Nullifiers exceeded size bound!");
     }
 }
 

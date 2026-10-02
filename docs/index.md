@@ -15,6 +15,7 @@ each covers and where to find it.
 | [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) | Contributor code of conduct |
 | [`SECURITY.md`](../SECURITY.md) | Security policy and responsible disclosure |
 | [`LICENSE`](../LICENSE) | Project license |
+| [`CHANGELOG.md`](../CHANGELOG.md) | Keep-a-Changelog release history (see Releases in CONTRIBUTING) |
 
 ## Hackathon-era artifacts (`docs/hackathon/` — point-in-time archive, not maintained)
 
@@ -33,15 +34,16 @@ an archive is allowed to contain stale claims.
 | File | Description |
 |---|---|
 | [`architecture.md`](architecture.md) | Detailed version of the README's repository structure: directory ownership, toolchains, and end-to-end data flow |
+| [`refactor-backlog.md`](refactor-backlog.md) | Dependency-ordered reading order for the refactor and hardening backlog (issues #455–#579): what blocks what, and the recurring defect patterns behind it |
 | [`wire-format.md`](wire-format.md) | Authoritative public signal order and Groth16 byte encodings across circuit, contract, and client |
 | [`canary.md`](canary.md) | Scheduling `scripts/e2e.ts` on testnet; foreground-run constraint |
 | [`ceremony.md`](ceremony.md) | **Planned** multi-party trusted-setup runbook (#546) — not executed |
 | [`poseidon-provenance.md`](poseidon-provenance.md) | Poseidon-over-BLS12-381 constants: packages, verification status, risks |
-| [`roadmap.md`](roadmap.md) | Mainnet readiness checklist (no target dates) |
+| [`mainnet-readiness.md`](mainnet-readiness.md) | Mainnet readiness checklist (no target dates) |
 | [`threat-model.md`](threat-model.md) | Assets, adversaries, and which code enforces each property |
 | [`troubleshooting.md`](troubleshooting.md) | Common setup and proof-verification failures |
 | [`observability.md`](observability.md) | SDK `SdkEvent` taxonomy (`onEvent`) for retries, proofs, artifacts, transactions |
-| [`deployment.md`](deployment.md) | How the live browser demo is built and manually deployed to Vercel |
+| [`deployment.md`](deployment.md) | Browser demo deploys plus releases and the Deployments table (tag -> contract ID -> schema -> vk hash) |
 | [`glossary.md`](glossary.md) | Plain-language crypto + ROSCA terms |
 
 ## Architecture decision records (`docs/adr/`)
@@ -64,6 +66,12 @@ an archive is allowed to contain stale claims.
 | [`audit/SCOPE.md`](audit/SCOPE.md) | Draft engagement scope for circuit, setup, contract, client |
 | [`audit/NEGATIVE_TESTS.md`](audit/NEGATIVE_TESTS.md) | Existing negative tests and known gaps |
 
+## Cross-implementation specification
+
+| File | Description |
+|---|---|
+| [`wire-format.md`](wire-format.md) | Authoritative wire-format spec: public signal order, external nullifier derivation, G1/G2 encoding, vk.ic length rules — validated by `test-vectors/wire-format.json` |
+
 ## Circuit docs
 
 | File | Description |
@@ -77,6 +85,13 @@ an archive is allowed to contain stale claims.
 |---|---|
 | [`contracts/README.md`](../contracts/README.md) | Contract build and deploy instructions |
 | [`contracts/BENCHMARKS.md`](../contracts/BENCHMARKS.md) | CPU instruction benchmarks and gas analysis for contract entrypoints |
+| [`events.md`](events.md) | Typed event schema: all seven `#[contractevent]` structs, topics, data fields, and lifecycle |
+
+## Verifiability
+
+| File | Description |
+|---|---|
+| [`judges/VERIFY.md`](../judges/VERIFY.md) | One-minute verification guide: confirm the on-chain proof is real without installing anything |
 
 ## Configuration examples
 
@@ -89,10 +104,12 @@ an archive is allowed to contain stale claims.
 
 ### Quick links by topic
 
-- **Just getting started:** [`README.md`](../README.md)
+- **Just getting started:** [`README.md`](../README.md), [`NOTES.md`](../NOTES.md)
 - **Historical build narrative:** [`NOTES.md`](../NOTES.md)
 - **Wire format / public signals:** [`wire-format.md`](wire-format.md)
 - **Deep technical dive:** [`full_product_breakdown.md`](../full_product_breakdown.md)
+- **Wire format / cross-implementation spec:** [`wire-format.md`](wire-format.md)
+- **Verifying the on-chain proof:** [`judges/VERIFY.md`](../judges/VERIFY.md)
 - **Historical verify checklist (archived):** [`hackathon/VERIFY.md`](hackathon/VERIFY.md)
 - **Building the circuit:** [`circuits/README.md`](../circuits/README.md)
 - **Building the contract:** [`contracts/README.md`](../contracts/README.md)

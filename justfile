@@ -3,9 +3,14 @@
 # Prerequisites: everything listed in README.md §0 (Rust, stellar CLI,
 # Node.js 20+, circom).
 #
-# Run `just --list` to see available recipes.  Any recipe can be run
-# manually with the raw commands in README.md — `just` is optional.
+# Gate definitions (do not invent a third):
+#   just ci      = the complete, authoritative gate (what CI runs)
+#   just verify  = fast pre-commit subset (typecheck + lint + unit tests)
 #
+# Keep genuinely-slow-or-networked work outside `ci`: e2e, circuits (trusted
+# setup), mutation, bench-contract, bench-prove.
+#
+# Run `just --list` to see available recipes.
 # Requires just >= 1.33.0 for set working-directory setting.
 set working-directory := '.'
 
@@ -15,15 +20,55 @@ set working-directory := '.'
 doctor *ARGS:
     npm run doctor --workspace=scripts -- {{ARGS}}
 
+# ── Audit ────────────────────────────────────────────────────────────────────
+
+# Dependency audit gate: npm advisories across every workspace plus cargo
+# advisories / licences / duplicate crates for the contracts crate.
+#
+# Findings are accepted only through the allowlist files below — never by
+# appending `|| true` to a command:
+#
+#   * npm  — `audit-allowlist.json` (root): entries of the form
+#            { "id": "GHSA-…", "reason": "…", "expires": "YYYY-MM-DD" }
+#   * cargo — `contracts/deny.toml` `[advisories] ignore = [...]` entries,
+#            each with a comment giving the reason and an expiry date.
+#
+# An allowlist entry past its expiry is a failure: re-triage the advisory
+# instead of bumping the date.
+audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "== npm audit (all workspaces, --audit-level=high) =="
+    npm audit --audit-level=high
+
+    echo ""
+    echo "== cargo audit (contracts/) =="
+    cd contracts && cargo audit
+
+    echo ""
+    echo "== cargo deny check (advisories, licences, bans, sources) =="
+    cd contracts && cargo deny check
+
+    echo ""
+    echo "audit: no unaccepted findings."
+
 # ── Circuits ──────────────────────────────────────────────────────────────────
 
 # Compile circuit, run trusted setup (with zkey verification), verify the
-# exported vk against the committed one, and run circuit tests
+# exported vk against the committed one, and run circuit tests.
+# NOT part of `just ci` — trusted setup is slow/stateful. Run on demand or
+# via a scheduled/on-demand workflow.
 circuits:
     cd circuits && npm run compile
     cd circuits && npm run setup
     cd circuits && npm run verify-setup
     cd circuits && npm test
+
+# Circuit unit + checker failure-path tests only (no trusted setup).
+# Safe for CI once dependencies are installed.
+circuits-test:
+    npm test --workspace=circuits
 
 # ── Contract ──────────────────────────────────────────────────────────────────
 
@@ -55,6 +100,15 @@ xdr-goldens:
 lint-dead:
     npm run lint:dead
 
+# ── Lint / typecheck slices (invoked by ci + verify) ─────────────────────────
+
+lint:
+    npm run lint
+
+typecheck:
+    npm run typecheck --workspace=packages/client
+    @if [ -f app/tsconfig.json ]; then cd app && npx --no-install tsc --noEmit; fi
+
 # ── Client ────────────────────────────────────────────────────────────────────
 
 # TypeScript typecheck AND unit/property tests for the client SDK
@@ -64,9 +118,14 @@ client:
 
 # ── Scripts ───────────────────────────────────────────────────────────────────
 
-# Run the scripts workspace unit tests (node --test)
+# Run the scripts workspace unit tests (node --test).
+# Hermetic: passes with networking disabled.
 scripts-test:
     npm test --workspace=scripts
+
+# Repo-structure / justfile hygiene (no duplicate recipe names, etc.)
+repo-structure-test:
+    node --import tsx/esm --test scripts/justfile-recipes.test.ts
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
@@ -100,8 +159,9 @@ verify:
     echo "\n== 3) Dead-code check (ts-prune; best-effort) =="; \
     npx -y ts-prune --summary || s_deadcode=1; \
 
-    echo "\n== 4) Unit tests (app + packages/client + circuits if present) =="; \
+    echo "\n== 4) Unit tests (app + packages/core + packages/client + circuits if present) =="; \
     npm run -s test --workspace=app || s_tests=1; \
+    npm run -s test --workspace=packages/core || s_tests=1; \
     npm run -s test --workspace=packages/client || s_tests=1; \
     if [ -f circuits/package.json ]; then (cd circuits && npm test --if-present) || true; fi; \
 
@@ -123,20 +183,33 @@ verify:
         exit 2; \
     fi
 
-# Mutation testing for the crypto modules (identity.ts + tree.ts).
-# Runs on demand — not part of the default test run.
-# Requires: npm install --workspace=packages/client (installs Stryker).
-# Expected runtime: ~3–8 minutes depending on CPU.
-# HTML report written to packages/client/reports/mutation/mutation.html.
-# Baseline mutation score (recorded 2026-08-31): see packages/client/MUTATION_SCORE.md.
-mutation:
-    npm run mutate --workspace=packages/client
+cargo-fmt:
+    cd contracts && cargo fmt --check
 
-# ── End-to-end ────────────────────────────────────────────────────────────────
+cargo-clippy:
+    cd contracts && cargo clippy --all-targets -- -D warnings
 
-# Full e2e round against live testnet (spends friendbot quota / testnet funds)
-e2e:
-    npm run e2e
+cargo-test:
+    cd contracts && cargo test
+
+stellar-build:
+    cd contracts && stellar contract build
+
+# Build the TypeScript SDK package.
+sdk-build:
+    npm run build --workspace=packages/client --if-present
+
+# ── CI (authoritative gate) ───────────────────────────────────────────────────
+# Complete gate shared by local contributors and GitHub Actions.
+# The workflow must call `just ci` (or the named slice recipes below) — never
+# an inlined command list that can drift from this definition.
+ci: sdk-build typecheck lint lint-dead scripts-test repo-structure-test client app-test circuits-test cargo-fmt cargo-clippy cargo-test stellar-build
+    @echo "just ci: all gate checks passed."
+
+# Fast pre-commit subset. Alias kept for muscle memory; NOT the full gate.
+# Use `just ci` before opening a PR.
+verify: typecheck lint client app-test
+    @echo "just verify: fast subset passed. Run \`just ci\` before opening a PR."
 
 # Browser end-to-end test of the whole demo flow (open page → create circle →
 # fund 5 members → prove → claim) in headless Chromium, against a local Vite
@@ -162,9 +235,8 @@ e2e-browser-live:
 
 # ── Test (all suites, no e2e) ─────────────────────────────────────────────────
 
-# Run every test suite in the repo.
-# Fails as soon as any suite fails; the summary at the end lists all results.
-# e2e is excluded — it requires live testnet funds and friendbot quota.
+# Run every test suite in the repo (still excludes e2e / trusted setup).
+# Prefer `just ci` for the merge gate — this recipe is the test-only slice.
 test:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -187,6 +259,7 @@ test:
 
     run_suite "dead-code check"   npm run lint:dead
     run_suite "client typecheck"  npm run typecheck --workspace=packages/client
+    run_suite "core tests"        npm test          --workspace=packages/core
     run_suite "client tests"      npm test          --workspace=packages/client
     run_suite "app tests"         npm test          --workspace=app
     run_suite "scripts tests"     npm test          --workspace=scripts
@@ -207,16 +280,19 @@ test:
     fi
     echo "  All ${#pass[@]} suites passed."
 
-# ── All (build + test, except e2e) ────────────────────────────────────────────
+# ── Slow / networked (outside ci) ─────────────────────────────────────────────
+
+# Mutation testing for the crypto modules (identity.ts + tree.ts).
+mutation:
+    npm run mutate --workspace=packages/client
+
+# Full e2e round against live testnet (spends friendbot quota / testnet funds)
+e2e:
+    npm run e2e
 
 # Build all artefacts and run every test suite (excluding e2e).
-# Equivalent to running circuits, contract, client, and test in sequence.
 all: circuits contract test
     @echo 'All recipes completed (e2e skipped — uses testnet funds/friendbot quota)'
-
-# Verify: run lint and client checks
-verify: client
-    npm run lint
 
 # Run coverage for all workspaces and print a short per-workspace summary.
 # Contracts coverage is a hard floor: cargo-llvm-cov --fail-under-lines reads
@@ -258,3 +334,7 @@ coverage:
 # Refresh the committed contract CPU benchmark table
 bench-contract:
     WRITE_BENCHMARKS=1 cargo test -p sharibo cpu_instruction_benchmarks -- --nocapture
+
+# Refresh the committed client proving benchmark table
+bench-prove:
+    WRITE_BENCHMARKS=1 npm run bench:prove --workspace=packages/client

@@ -1,8 +1,8 @@
 /// <reference types="vitest" />
-import { configDefaults, defineConfig } from "vitest/config";
-import react from "@vitejs/plugin-react";
+import { defineConfig, mergeConfig } from "vitest/config";
 import fs from "fs";
 import path from "path";
+import viteConfig from "./vite.config.js";
 
 // Shares the same plugin-react config as vite.config.ts so JSX transform and
 // Fast Refresh are applied identically in tests and in the dev server.
@@ -16,11 +16,7 @@ try {
   // Missing thresholds file is non-fatal; continue with permissive defaults
 }
 
-export default defineConfig({
-  plugins: [react()],
-  define: {
-    global: "globalThis",
-  },
+export default mergeConfig(viteConfig, defineConfig({
   test: {
     // jsdom provides a browser-like DOM environment without a real browser.
     environment: "jsdom",

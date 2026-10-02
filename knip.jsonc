@@ -29,6 +29,10 @@
   // entry points for each workspace.
 
   "workspaces": {
+    "root": {
+      "entry": ["__mocks__/**/*.ts"],
+      "project": ["__mocks__/**/*.ts"]
+    },
     // ── app workspace ───────────────────────────────────────────────────────
     "app": {
       "entry": [
@@ -96,6 +100,12 @@
       // snarkjs ships without type declarations; the binary is used in shell
       // scripts, not imported as a module.
       "ignoreDependencies": ["snarkjs"]
+    },
+
+    // ── test-vectors workspace ──────────────────────────────────────────────
+    "test-vectors": {
+      "entry": ["generate.mjs"],
+      "project": ["generate.mjs"]
     }
   },
 

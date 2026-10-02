@@ -11,7 +11,7 @@ No toolchain installation required for steps 1–2. Everything here checks the d
 ## 1. The accepted proof is a real, successful transaction
 
 ```bash
-curl -s https://horizon-testnet.stellar.org/transactions/2258397474e3ad420d6dd8310cb0976d270c29ec4a4ec2b60a9ae58408088087 \
+curl -s https://horizon-testnet.stellar.org/transactions/<TX_HASH> \
   | grep -E '"successful"|"ledger"'
 ```
 
@@ -28,7 +28,7 @@ This transaction called `claim()` on the deployed Sharibo contract with a real G
 
 ```bash
 stellar contract invoke \
-  --id CB64IZIBBSPUY63UMIVACKWDKRFNH6WJ2EPAOLM7QR4ZI6IJOT4N2LCF \
+  --id <CONTRACT_ID> \
   --network testnet -- get_circle --circle_id 0
 ```
 
@@ -50,7 +50,7 @@ This script funds a fresh 5-member circle, submits a real proof, claims to a bra
 
 ## 4. Or just look
 
-- Contract: https://stellar.expert/explorer/testnet/contract/CB64IZIBBSPUY63UMIVACKWDKRFNH6WJ2EPAOLM7QR4ZI6IJOT4N2LCF — five deposits in and one payout out, no visible link between them.
+- Contract: https://stellar.expert/explorer/testnet/contract/<CONTRACT_ID> — five deposits in and one payout out, no visible link between them.
 - Live app (click through the whole flow yourself, generating your own proof in your own browser): see the README's "live app" link.
 
 ## What this does _not_ prove
