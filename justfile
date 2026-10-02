@@ -211,6 +211,28 @@ ci: sdk-build typecheck lint lint-dead scripts-test repo-structure-test client a
 verify: typecheck lint client app-test
     @echo "just verify: fast subset passed. Run \`just ci\` before opening a PR."
 
+# Browser end-to-end test of the whole demo flow (open page → create circle →
+# fund 5 members → prove → claim) in headless Chromium, against a local Vite
+# dev server. Soroban RPC and Friendbot are MOCKED, so this spends nothing; the
+# Groth16 proving is still real (real wasm + zkey, in the browser).
+#
+# Needs the circuit artifacts (`just circuits`) — see docs/troubleshooting.md.
+# Not part of `just test` / `npm test`. Failure traces: app/e2e/test-results/.
+e2e-browser:
+    npm run build --workspace=packages/client
+    npm run sync-circuit --workspace=app
+    cd app && npx playwright install chromium
+    npm run test:e2e --workspace=app
+
+# The same browser flow against LIVE testnet: SPENDS testnet funds and
+# friendbot quota (like `just e2e`). Opt-in only; refuses to start unless
+# app/.env (or the environment) has real testnet contract IDs.
+e2e-browser-live:
+    npm run build --workspace=packages/client
+    npm run sync-circuit --workspace=app
+    cd app && npx playwright install chromium
+    E2E_LIVE=1 npm run test:e2e --workspace=app
+
 # ── Test (all suites, no e2e) ─────────────────────────────────────────────────
 
 # Run every test suite in the repo (still excludes e2e / trusted setup).

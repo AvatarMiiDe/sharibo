@@ -1683,7 +1683,7 @@ export default function App() {
         )}
 
         {claimResult && (
-          <div className={styles.result}>
+          <div className={styles.result} data-testid="claim-result">
             <h2 ref={payoutHeadingRef} tabIndex={-1}>
               {t("result.heading")}
             </h2>
