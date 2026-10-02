@@ -207,9 +207,18 @@ describe("VITE_TEST_TOKEN_CONTRACT_ID", () => {
 });
 
 describe("aggregate behavior", () => {
-  it("reports all four problems when every variable is missing", () => {
-    const { config, errors } = validate({});
-    expect(errors).toEqual([
+  it("rejects a circle size larger than the circuit capacity", async () => {
+    vi.stubEnv("LEVELS", "2");
+    const mod = await loadConfig(VALID);
+    expect(mod.configError).toContain(
+      "CIRCLE_SIZE — 5 exceeds MAX_CIRCLE_SIZE (4) for TREE_LEVELS=2",
+    );
+    expect(mod.config).toBeNull();
+  });
+
+  it("reports all four problems when every variable is missing", async () => {
+    const mod = await loadConfig({});
+    expect(mod.configError).toEqual([
       "VITE_SHARIBO_CONTRACT_ID — missing or empty",
       "VITE_STELLAR_RPC_URL — missing or empty",
       "VITE_STELLAR_NETWORK_PASSPHRASE — missing or empty",

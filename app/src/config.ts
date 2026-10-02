@@ -1,4 +1,4 @@
-import { NETWORKS } from "@sharibo/client";
+import { MAX_CIRCLE_SIZE, NETWORKS, TREE_LEVELS } from "@sharibo/client";
 /**
  * Reads and validates all required VITE_* environment variables at module
  * load time.  Import `config` wherever you need the values; import
@@ -9,7 +9,9 @@ import { NETWORKS } from "@sharibo/client";
  * dereferencing it — there is no fake empty object that silently surfaces
  * `undefined` fields at runtime.
  */
-import { TREE_LEVELS } from "@sharibo/client";
+
+/** Fixed demo circle size, constrained by the circuit's Merkle-tree capacity. */
+export const CIRCLE_SIZE = 5;
 
 export interface AppConfig {
   contractId: string;
@@ -69,6 +71,12 @@ export function validate(env: Record<string, string | undefined> = import.meta.e
   } else if (!isContractId(testTokenContractId)) {
     errors.push(
       `VITE_TEST_TOKEN_CONTRACT_ID — invalid shape (got "${testTokenContractId}"; expected a 56-character Stellar contract ID starting with 'C')`,
+    );
+  }
+
+  if (CIRCLE_SIZE > MAX_CIRCLE_SIZE) {
+    errors.push(
+      `CIRCLE_SIZE — ${CIRCLE_SIZE} exceeds MAX_CIRCLE_SIZE (${MAX_CIRCLE_SIZE}) for TREE_LEVELS=${TREE_LEVELS}`,
     );
   }
 

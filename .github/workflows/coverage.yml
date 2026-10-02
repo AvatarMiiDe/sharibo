@@ -46,6 +46,12 @@ jobs:
           fi
           cargo llvm-cov --version
 
+      - name: Cargo fmt and clippy
+        working-directory: contracts
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+
       - name: Run contract coverage with floor
         working-directory: contracts
         run: |
