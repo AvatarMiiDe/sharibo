@@ -8,6 +8,12 @@ pragma circom 2.1.6;
 // pairing against a 100M budget, i.e. infeasible. So the whole pipeline
 // targets BLS12-381 instead, using a third-party Poseidon parameterization
 // for that field (circomlib's Poseidon constants are BN254-only) — see
+// NOTES.md for the full reasoning and provenance.
+//
+// Public signal order, external nullifier derivation, G1/G2 encoding,
+// and vk.ic length rules are specified in docs/wire-format.md — that
+// document is the single source of truth; do not describe the wire format
+// here.
 // docs/adr/005-bls12-381-curve-choice.md and docs/poseidon-provenance.md.
 include "poseidon-bls12381-circom/circuits/poseidon255.circom";
 
@@ -75,6 +81,9 @@ template MerkleTreeChecker(levels) {
 // commitment sits in the circle's Merkle tree, and emits a nullifier bound
 // to (identityNullifier, externalNullifier) so the contract can block a
 // second claim in the same round without learning who claimed.
+//
+// Public signal order is [nullifierHash, root, externalNullifier] —
+// see docs/wire-format.md §1.
 template Sharibo(levels) {
     // private witness (never leaves the member's device)
     signal input identityNullifier;
@@ -84,6 +93,7 @@ template Sharibo(levels) {
 
     // public inputs (checked in the contract)
     signal input root;              // circle's committed member set
+    signal input externalNullifier; // see docs/wire-format.md §2 for derivation
     // = SHA-256(circleId, roundIndex) mod r, reduced into the contract by
     // the same rule (docs/wire-format.md — SHA-256, not Poseidon, by
     // design: it binds the proof to a round outside the circuit's
@@ -130,3 +140,6 @@ template Sharibo(levels) {
 // the result to circuits/membership.circom (generated, gitignored) before
 // every compile/test run. See "Changing the Merkle tree depth" in the repo
 // README for the full runbook.
+//
+// Public signal order is defined by the `component main { public [...] }`
+// line that gen-circuit.cjs produces — see docs/wire-format.md §1.

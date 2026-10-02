@@ -8,36 +8,34 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { writeFileSync, unlinkSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = path.join(__dirname, "..");
-const envPath = path.join(rootDir, ".env");
 
-// Backup/restore .env around tests since config.ts reads it eagerly on import.
-let envBackup: string | null = null;
+// Each test gets a fresh temp directory containing a single `.env` fixture,
+// and config.ts is pointed at it via SHARIBO_ENV_FILE. The previous version
+// wrote the developer's real repo-root `.env` and restored it afterwards,
+// which made this file race against smoke.test.ts (node --test runs files
+// in parallel) and would clobber a real .env for good if the process died
+// mid-run.
+let fixtureDir: string;
+let envPath: string;
+
+beforeEach(() => {
+  fixtureDir = mkdtempSync(path.join(tmpdir(), "sharibo-config-test-"));
+  envPath = path.join(fixtureDir, ".env");
+});
+
+afterEach(() => {
+  rmSync(fixtureDir, { recursive: true, force: true });
+});
 
 function writeEnv(content: string) {
   writeFileSync(envPath, content, "utf8");
 }
-
-beforeEach(() => {
-  try {
-    envBackup = readFileSync(envPath, "utf8");
-  } catch {
-    envBackup = null;
-  }
-});
-
-afterEach(() => {
-  if (envBackup !== null) {
-    writeFileSync(envPath, envBackup, "utf8");
-  } else if (existsSync(envPath)) {
-    unlinkSync(envPath);
-  }
-});
 
 /**
  * Helper to load config.ts as a subprocess and capture its output.
@@ -64,9 +62,9 @@ async function loadConfigSubprocess(
   `;
   try {
     const { stdout, stderr } = await execFileAsync(
-      "node",
+      process.execPath,
       ["--import", "tsx/esm", "--eval", script],
-      { cwd: __dirname, timeout: 10_000 },
+      { cwd: __dirname, timeout: 10_000, env: { ...process.env, SHARIBO_ENV_FILE: envPath } },
     );
     return { stdout, stderr, exitCode: 0 };
   } catch (err: unknown) {
@@ -82,7 +80,7 @@ async function loadConfigSubprocess(
 describe("config loader", () => {
   // Valid minimal config for success tests
   const validEnv = [
-    "STELLAR_RPC_URL=https://soroban-testnet.stellar.org",
+    "STELLAR_RPC_URL=https://rpc.invalid",
     'STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"',
     "TEST_TOKEN_CONTRACT_ID=CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
     "SHARIBO_CONTRACT_ID=CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBN7DY",
@@ -272,7 +270,7 @@ describe("config loader", () => {
     const contractId = "CBADCONTRACTID00000000000000000000000000000000000000";
     const secretKey = "SSECRETKEYSHOULDBEHIDDEN0000000000000000000000000000";
     const env = [
-      "STELLAR_RPC_URL=https://soroban-testnet.stellar.org",
+      "STELLAR_RPC_URL=https://rpc.invalid",
       'STELLAR_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"',
       `TEST_TOKEN_CONTRACT_ID=${contractId}`,
       "SHARIBO_CONTRACT_ID=CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBN7DY",
@@ -310,7 +308,7 @@ describe("config loader", () => {
 
   it("strips surrounding quotes from env values", async () => {
     const env = [
-      'STELLAR_RPC_URL="https://soroban-testnet.stellar.org"',
+      'STELLAR_RPC_URL="https://rpc.invalid"',
       "STELLAR_NETWORK_PASSPHRASE='Test SDF Network ; September 2015'",
       "TEST_TOKEN_CONTRACT_ID=CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
       "SHARIBO_CONTRACT_ID=CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBN7DY",
