@@ -1,5 +1,7 @@
 # Sharibo Trusted-Setup Transcript
 
+> **Current status:** single-contributor / demo setup only (`circuits/scripts/setup.sh`, entropy from `/dev/urandom`). A multi-party phase-2 ceremony has **not** been executed. When it runs, follow [docs/ceremony.md](../docs/ceremony.md) (#546) and append attestations here.
+
 Each entry below records one ceremony run. The **verification key hash** is
 the authoritative fingerprint: it must match `shasum -a 256 verification_key.json`
 (or `sha256sum verification_key.json` on Linux) for any set of local artifacts
