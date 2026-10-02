@@ -93,23 +93,49 @@ async function checkRust(): Promise<Check> {
   const rustc = await run("rustc", ["--version"]);
   const targetList = await run("rustup", ["target", "list", "--installed"]);
   const hasTarget = targetList.includes("wasm32v1-none");
-  const required = "rustc >= 1.56.0 + wasm32v1-none target";
+
+  let toolchainChannel = "1.94.1";
+  try {
+    const toolchainContent = readFileSync(
+      path.join(REPO_ROOT, "rust-toolchain.toml"),
+      "utf8",
+    );
+    const match = toolchainContent.match(/channel\s*=\s*"([^"]+)"/);
+    if (match && match[1]) {
+      toolchainChannel = match[1];
+    }
+  } catch (e) {
+    // fallback if file doesn't exist
+  }
+
+  const required = `rustc == ${toolchainChannel} (pinned in rust-toolchain.toml) + wasm32v1-none target`;
 
   if (rustc.startsWith("rustc ")) {
     const version = rustc.split(" ")[1];
-    const versionOk = semverCompare(version, "1.56.0") >= 0;
+    const versionOk = version === toolchainChannel;
+    const ok = versionOk && hasTarget;
+
+    let fixStr = `rustup install ${toolchainChannel} && rustup target add wasm32v1-none`;
+    if (hasTarget && versionOk) {
+      fixStr = "";
+    } else if (hasTarget) {
+      fixStr = `rustup default ${toolchainChannel} (or ensure rust-toolchain.toml is picked up)`;
+    } else if (versionOk) {
+      fixStr = `rustup target add wasm32v1-none`;
+    }
+
+    const autofix: Check["autofix"] = hasTarget
+      ? undefined
+      : { command: "rustup", args: ["target", "add", "wasm32v1-none"] };
+
     return {
       name: "Rust + wasm32v1-none",
       blocking: true,
-      ok: versionOk && hasTarget,
+      ok,
       found: `${rustc} | wasm32v1-none: ${hasTarget}`,
       required,
-      fix: hasTarget
-        ? "rustup update stable"
-        : "rustup target add wasm32v1-none",
-      autofix: hasTarget
-        ? undefined
-        : { command: "rustup", args: ["target", "add", "wasm32v1-none"] },
+      fix: fixStr,
+      autofix,
       docsAnchor: "missing-wasm32v1-none-rust-target",
     };
   }
@@ -119,7 +145,7 @@ async function checkRust(): Promise<Check> {
     ok: false,
     found: "missing",
     required,
-    fix: "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && rustup target add wasm32v1-none",
+    fix: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && rustup install ${toolchainChannel} && rustup target add wasm32v1-none`,
     docsAnchor: "missing-wasm32v1-none-rust-target",
   };
 }
@@ -240,8 +266,8 @@ async function checkCircom(): Promise<Check> {
     writeFileSync(
       tmpCircom,
       "pragma circom 2.1.6;\n" +
-      "template Doctor() {}\n" +
-      "component main {public []=} = Doctor();\n",
+        "template Doctor() {}\n" +
+        "component main {public []=} = Doctor();\n",
     );
     const primeOut = await run("circom", [
       "--prime",
@@ -253,17 +279,16 @@ async function checkCircom(): Promise<Check> {
       tmpJson,
     ]);
     primeOk =
-      !primeOut.includes("Unknown prime") &&
-      !primeOut.includes("__ERROR__");
+      !primeOut.includes("Unknown prime") && !primeOut.includes("__ERROR__");
     try {
       unlinkSync(tmpCircom);
-    } catch { }
+    } catch {}
     try {
       unlinkSync(tmpJson);
-    } catch { }
+    } catch {}
     try {
       unlinkSync(path.join(TMP_DIR, "doctor.r1cs"));
-    } catch { }
+    } catch {}
     return {
       name: "circom",
       blocking: true,
@@ -301,7 +326,9 @@ async function checkCircomDeps(): Promise<Check> {
     name: "circuit JavaScript dependencies",
     blocking: true,
     ok,
-    found: packageNames.map((name) => `${name}: ${found[name] ? "installed" : "missing"}`).join(" | "),
+    found: packageNames
+      .map((name) => `${name}: ${found[name] ? "installed" : "missing"}`)
+      .join(" | "),
     required:
       "snarkjs, mocha, and circom_tester installed (needed by circuit setup and tests)",
     fix: "npm install",
@@ -335,7 +362,12 @@ async function checkClientDist(): Promise<Check> {
 }
 
 async function checkCircuitArtifacts(): Promise<Check> {
-  const verifier = path.join(REPO_ROOT, "circuits", "scripts", "verify-artifacts.mjs");
+  const verifier = path.join(
+    REPO_ROOT,
+    "circuits",
+    "scripts",
+    "verify-artifacts.mjs",
+  );
   const result = await run(process.execPath, [verifier]);
   const ok = result === "Circuit artifacts verified.";
 
@@ -343,7 +375,9 @@ async function checkCircuitArtifacts(): Promise<Check> {
     name: "circuit build artifacts and SHA-256 manifests",
     blocking: true,
     ok,
-    found: ok ? result : result.replace(/^__ERROR__:[^:]+:?\s*/, "").replace(/\n/g, " "),
+    found: ok
+      ? result
+      : result.replace(/^__ERROR__:[^:]+:?\s*/, "").replace(/\n/g, " "),
     required:
       "Compiled membership wasm, final zkey, verification key, and matching SHA-256 manifests",
     fix: "cd circuits && npm run compile && ALLOW_KEY_ROTATION=1 npm run setup",
@@ -375,13 +409,20 @@ async function checkEnv(): Promise<Check> {
     if (eq === -1) continue;
     const key = trimmed.slice(0, eq).trim();
     let value = trimmed.slice(eq + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
       value = value.slice(1, -1);
     }
     envValues[key] = process.env[key] ?? value;
   }
 
-  const requiredKeys = ["TEST_TOKEN_CONTRACT_ID", "SHARIBO_CONTRACT_ID", "ADMIN_SECRET_KEY"];
+  const requiredKeys = [
+    "TEST_TOKEN_CONTRACT_ID",
+    "SHARIBO_CONTRACT_ID",
+    "ADMIN_SECRET_KEY",
+  ];
   const invalidKeys = requiredKeys.filter((key) => {
     const value = envValues[key]?.trim() ?? "";
     const prefix = key === "ADMIN_SECRET_KEY" ? "S" : "C";
@@ -391,7 +432,8 @@ async function checkEnv(): Promise<Check> {
   if (rpcUrl) {
     try {
       const url = new URL(rpcUrl);
-      if (url.protocol !== "http:" && url.protocol !== "https:") invalidKeys.push("STELLAR_RPC_URL");
+      if (url.protocol !== "http:" && url.protocol !== "https:")
+        invalidKeys.push("STELLAR_RPC_URL");
     } catch {
       invalidKeys.push("STELLAR_RPC_URL");
     }
@@ -405,9 +447,9 @@ async function checkEnv(): Promise<Check> {
     found: ok
       ? ".env present; required contract IDs and secret key have valid formats"
       : `invalid or missing values: ${[...new Set(invalidKeys)].join(", ")}`,
-    required: "Valid TEST_TOKEN_CONTRACT_ID, SHARIBO_CONTRACT_ID, ADMIN_SECRET_KEY; optional STELLAR_RPC_URL must be HTTP(S)",
-    fix:
-      "Fill the listed values in .env (see .env.example and README §1 for generating Stellar keys)",
+    required:
+      "Valid TEST_TOKEN_CONTRACT_ID, SHARIBO_CONTRACT_ID, ADMIN_SECRET_KEY; optional STELLAR_RPC_URL must be HTTP(S)",
+    fix: "Fill the listed values in .env (see .env.example and README §1 for generating Stellar keys)",
     docsAnchor: "scripts-fail-because-env-is-missing-or-invalid",
   };
 }
@@ -420,7 +462,8 @@ async function checkCargoCov(): Promise<Check> {
     blocking: false,
     ok,
     found: ok ? out : "missing",
-    required: "optional — needed only for `just coverage` (contracts coverage report)",
+    required:
+      "optional — needed only for `just coverage` (contracts coverage report)",
     fix: "cargo install cargo-llvm-cov",
     docsAnchor: "cargo-llvm-cov-is-optional",
   };
@@ -473,11 +516,21 @@ function printCheck(c: Check): void {
 async function main(): Promise<void> {
   console.log("\n🩺 Sharibo toolchain doctor\n");
 
-  const checkAll = async (): Promise<Check[]> => Promise.all([
-    checkRust(), checkCurl(), checkStellar(), checkNode(), checkNodeVersion(),
-    checkCircom(), checkCircomDeps(), checkClientDist(), checkCircuitArtifacts(),
-    checkEnv(), checkCargoCov(), checkJust(),
-  ]);
+  const checkAll = async (): Promise<Check[]> =>
+    Promise.all([
+      checkRust(),
+      checkCurl(),
+      checkStellar(),
+      checkNode(),
+      checkNodeVersion(),
+      checkCircom(),
+      checkCircomDeps(),
+      checkClientDist(),
+      checkCircuitArtifacts(),
+      checkEnv(),
+      checkCargoCov(),
+      checkJust(),
+    ]);
   let checks = await checkAll();
 
   if (FIX_MODE) {
@@ -502,8 +555,8 @@ async function main(): Promise<void> {
   if (blocking.length > 0) {
     console.log(
       `\n❌ ${blocking.length} blocking issue(s) found.\n` +
-      `   Run \`just doctor --fix\` to auto-resolve mechanical issues,\n` +
-      `   then follow the fix: lines above for the rest.\n`,
+        `   Run \`just doctor --fix\` to auto-resolve mechanical issues,\n` +
+        `   then follow the fix: lines above for the rest.\n`,
     );
     process.exit(1);
   }

@@ -14,6 +14,31 @@ import { I18nProvider } from "./i18n";
 // relative to its own root (app/), which is not where the mock lives.
 vi.mock("@sharibo/client", () => import("../../__mocks__/@sharibo/client"));
 
+// Wallet stand-in. Tests never load the browser extension.
+const { fakeSigner } = vi.hoisted(() => {
+  const fakeSigner = {
+    publicKey: async () => "GMOCKPUBLICKEY000000000000000000000000000000000000000000",
+    signTransaction: async (xdr: string) => xdr,
+    networkPassphrase: async () => "Test SDF Network ; September 2015",
+  };
+  return { fakeSigner };
+});
+
+vi.mock("./lib/wallet", () => ({
+  isFreighterAvailable: async () => false,
+  selectSigner: async ({ demo }: { demo: typeof fakeSigner }) => demo,
+  createDemoSigner: async () => fakeSigner,
+  demoSignerFromSecret: async () => fakeSigner,
+  randomDemoAddress: async () => fakeSigner.publicKey(),
+  toShariboSigner: async (signer: {
+    publicKey: () => Promise<string>;
+    signTransaction: (xdr: string) => Promise<string>;
+  }) => ({
+    publicKey: await signer.publicKey(),
+    signTransaction: async (xdr: string) => signer.signTransaction(xdr),
+  }),
+}));
+
 vi.mock("./config", () => ({
   config: {
     contractId: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -81,6 +106,14 @@ describe("App — landing screen", () => {
   it("renders the testnet-only disclaimer fineprint", () => {
     renderApp();
     expect(screen.getByText(/testnet only/i)).toBeInTheDocument();
+  });
+
+  it("signs with the fake signer and does not touch a wallet extension", async () => {
+    renderApp();
+    expect(await fakeSigner.publicKey()).toMatch(/^G/);
+    expect(await fakeSigner.signTransaction("tx-xdr")).toBe("tx-xdr");
+    expect(await fakeSigner.networkPassphrase()).toContain("Test SDF");
+    expect(screen.queryByRole("button", { name: /freighter/i })).not.toBeInTheDocument();
   });
 
   it("switches the happy-path landing screen to Spanish", async () => {
