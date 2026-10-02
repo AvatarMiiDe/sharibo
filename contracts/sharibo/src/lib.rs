@@ -425,11 +425,11 @@ impl Contract {
     ///   is eligible to claim. Stored in [`Circle::root`].
     /// * `contribution` — fixed amount each [`Self::fund`] deposits.
     ///   Stored in [`Circle::contribution`].
-/// * `size` — number of funders needed to fill a round. `pot_target =
-///   contribution * size`. Stored in [`Circle::size`]. Capped at
-///   [`MAX_CIRCLE_SIZE`] (the Merkle tree's capacity); a larger size is
-///   rejected with [`Error::InvalidCircleParams`] since no more than
-///   2^levels members can ever prove membership.
+    /// * `size` — number of funders needed to fill a round. `pot_target =
+    ///   contribution * size`. Stored in [`Circle::size`]. Capped at
+    ///   [`MAX_CIRCLE_SIZE`] (the Merkle tree's capacity); a larger size is
+    ///   rejected with [`Error::InvalidCircleParams`] since no more than
+    ///   2^levels members can ever prove membership.
     /// * `vk` — Groth16 verification key for the membership circuit.
     ///   Stored in [`Circle::vk`].
     /// * `fee_bps` — protocol fee in basis points (`0..=10_000`; `10_000`
@@ -768,11 +768,7 @@ impl Contract {
         let (fee, net) = apply_fee(&env, circle.fee_bps, payout);
         let token_client = token::Client::new(&env, &circle.token);
         if fee > 0 {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &circle.fee_recipient,
-                &fee,
-            );
+            token_client.transfer(&env.current_contract_address(), &circle.fee_recipient, &fee);
         }
         token_client.transfer(&env.current_contract_address(), &recipient, &net);
 

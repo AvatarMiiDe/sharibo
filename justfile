@@ -74,6 +74,8 @@ circuits-test:
 
 # Run contract unit tests and build wasm binary
 contract:
+    cd contracts && cargo fmt --check
+    cd contracts && cargo clippy --all-targets -- -D warnings
     cd contracts && cargo test
     cd contracts && stellar contract build
 
