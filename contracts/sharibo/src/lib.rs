@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 #[cfg(test)]
 extern crate std;
 
@@ -7,7 +8,7 @@ mod storage;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype,
     crypto::bls12_381::{Fr, G1Affine, G2Affine},
-    panic_with_error, symbol_short, token, vec, xdr::ToXdr, Address, Bytes, Env, Vec,
+    panic_with_error, token, vec, xdr::ToXdr, Address, Bytes, Env, Vec,
 };
 
 use crate::storage::{load_circle, save_circle, bump_instance, LEDGER_EXTEND_TO, LEDGER_THRESHOLD};
@@ -350,7 +351,9 @@ const _: () = assert!(
 pub struct Contract;
 
 #[contractimpl]
+#[allow(clippy::too_many_arguments)]
 impl Contract {
+    /// Create a new contribution circle and return its assigned `circle_id`.
     /// Create a new contribution circle and return its assigned `circle_id`.
     ///
     /// # Authentication
@@ -400,6 +403,7 @@ impl Contract {
     /// * [`Error::InvalidFeeParams`] — `fee_bps` outside `0..=10_000`.
     /// * [`Error::InvalidRecipient`] — `fee_bps > 0` but `fee_recipient` is
     ///   the contract's own address, which would strand the fee forever.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_circle(
         env: Env,
         admin: Address,
@@ -486,15 +490,14 @@ impl Contract {
         // periods (see contracts/README.md §Instance-storage archival).
         extend_instance_ttl(&env);
 
-        env.events().publish(
-            (symbol_short!("circle"), symbol_short!("created"), circle_id),
-            (
-                circle.admin.clone(),
-                circle.token.clone(),
-                circle.contribution,
-                circle.size,
-            ),
-        );
+         CircleCreated {
+             circle_id,
+             admin: circle.admin.clone(),
+             token: circle.token.clone(),
+             contrib: circle.contribution,
+             size: circle.size,
+         }
+        .publish(&env);
         circle_id
     }
 
@@ -529,6 +532,7 @@ impl Contract {
     ///   exact-equality check. See `contracts/README.md`.
     /// * [`Error::Overflow`] — `contribution * size` (computed via
     ///   `pot_target`) or `pot + contribution` overflows `i128`.
+    #[allow(clippy::too_many_arguments)]
     pub fn fund(env: Env, circle_id: u64, from: Address) {
         from.require_auth();
 
@@ -630,6 +634,7 @@ impl Contract {
     /// * [`Error::InvalidProof`] — check 4 failed.
     /// * [`Error::Overflow`] — computing `contribution * size` overflows
     ///   `i128` (absurd parameters set at circle creation).
+    #[allow(clippy::too_many_arguments)]
     pub fn claim(
         env: Env,
         circle_id: u64,
@@ -719,10 +724,13 @@ impl Contract {
         }
         token_client.transfer(&env.current_contract_address(), &recipient, &net);
 
-        env.events().publish(
-            (symbol_short!("circle"), symbol_short!("claimed"), circle_id),
-            (claimed_round, payout, recipient),
-        );
+         CircleClaimed {
+             circle_id,
+             cround: claimed_round,
+             payout,
+             recipient: recipient.clone(),
+         }
+        .publish(&env);
     }
 
     /// Look up a [`Circle`] by its assigned id.
@@ -853,6 +861,7 @@ impl Contract {
     ///
     /// Reverts with [`Error::CircleCancelled`] on a cancelled circle — there
     /// is no point transferring admin rights once the circle is closed.
+    #[allow(clippy::too_many_arguments)]
     pub fn propose_admin(env: Env, circle_id: u64, new_admin: Address) {
         let circle = load_circle(&env, circle_id);
 
@@ -872,17 +881,19 @@ impl Contract {
             .instance()
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
 
-        env.events().publish(
-            (soroban_sdk::symbol_short!("prop_adm"), circle_id),
-            (circle.admin, new_admin),
-        );
+        AdminProposed {
+            circle_id,
+            old_admin: circle.admin.clone(),
+            new_admin,
+        }
+        .publish(&env);
     }
 
     /// Step 2 of two-step admin transfer: the nominated address accepts,
     /// atomically updating `Circle.admin` and clearing the pending slot.
     ///
     /// Only the address stored by [`Self::propose_admin`] may call this.
-    /// Reverts with [`Error::CircleCancelled`] on a cancelled circle.
+    #[allow(clippy::too_many_arguments)]
     pub fn accept_admin(env: Env, circle_id: u64) {
         let mut circle = load_circle(&env, circle_id);
 
@@ -911,10 +922,12 @@ impl Contract {
             .extend_ttl(LEDGER_THRESHOLD, LEDGER_EXTEND_TO);
         env.storage().persistent().remove(&pending_key);
 
-        env.events().publish(
-            (soroban_sdk::symbol_short!("acc_adm"), circle_id),
-            (old_admin, new_admin),
-        );
+        AdminAccepted {
+            circle_id,
+            old_admin,
+            new_admin: new_admin.clone(),
+        }
+        .publish(&env);
     }
 
     /// Permissionless: expire a stuck round and refund all current-round
@@ -938,6 +951,7 @@ impl Contract {
     /// - Increments `circle.round` so old proof round-tags are invalidated.
     /// - Resets `pot`, `contributors`, and `round_started_ledger`.
     /// - Emits a `rnd_exp` event.
+    #[allow(clippy::too_many_arguments)]
     pub fn expire_round(env: Env, circle_id: u64) {
         let mut circle = load_circle(&env, circle_id);
 
@@ -975,10 +989,11 @@ impl Contract {
         circle.round_started_ledger = env.ledger().sequence();
         persist_circle(&env, circle_id, &circle);
 
-        env.events().publish(
-            (soroban_sdk::symbol_short!("rnd_exp"), circle_id),
-            expired_round,
-        );
+         RoundExpired {
+             circle_id,
+             eround: expired_round,
+         }
+        .publish(&env);
     }
 
     /// Admin-only: cancel a stuck circle and refund all current-round
@@ -1016,6 +1031,7 @@ impl Contract {
     ///
     /// * [`Error::CircleNotFound`] — `circle_id` does not exist.
     /// * [`Error::CircleCancelled`] — circle was already cancelled.
+    #[allow(clippy::too_many_arguments)]
     pub fn cancel_circle(env: Env, circle_id: u64) {
         let mut circle = load_active_circle(&env, circle_id);
 
@@ -1060,10 +1076,12 @@ impl Contract {
             );
         }
 
-        env.events().publish(
-            (symbol_short!("circle"), symbol_short!("cancelled"), circle_id),
-            (refunded_count, refunded_total),
-        );
+         CircleCancelled {
+             circle_id,
+             rcount: refunded_count,
+             rtotal: refunded_total,
+         }
+        .publish(&env);
     }
 
     // External nullifier derivation: SHA-256 over big-endian u64(circle_id)
