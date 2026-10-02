@@ -7,7 +7,9 @@ This directory contains the Soroban smart contracts for **Sharibo**, private rot
 | `create_circle` | write | Admin creates a circle (Merkle root, contribution, size, vk, fee).  |
 | `fund`          | write | Deposit one `contribution` into the current round's pot.           |
 | `claim`         | write | Pay the pot (minus protocol fee) to `recipient` given a valid proof.|
-| `get_circle`    | view  | Read circle state.                                                 |
+| `get_circle`    | view  | Read full circle state (includes the verification key).            |
+| `get_circle_meta` | view | Read mutable/small circle fields — the poll-friendly read.        |
+| `get_vk`        | view  | Read the circle's verification key (fetch once, cache it).         |
 | `has_claimed`   | view  | Whether a nullifier has already been used in this circle.          |
 
 ---
@@ -241,6 +243,41 @@ Below is the documentation for all public contract methods.
 
 * **Purpose**:
   A view method to retrieve the complete public state and configuration of a circle (e.g., admin, token, Merkle root, round, current pot, and contributors).
+
+* **Preconditions**:
+  * The circle associated with `circle_id` must exist.
+
+### `get_circle_meta`
+
+* **Signature**:
+  ```rust
+  pub fn get_circle_meta(env: Env, circle_id: u64) -> CircleMeta
+  ```
+
+* **Purpose**:
+  The poll-friendly alternative to `get_circle`: returns the mutable/small
+  fields (`schema_version`, `admin`, `token`, `root`, `contribution`, `size`,
+  `round`, `pot`, `cancelled`, `round_deadline_ledgers`,
+  `round_started_ledger`, `fee_bps`, `fee_recipient`) without the embedded
+  `VerificationKey` or the `contributors`/`nullifiers` vectors. On BLS12-381
+  the VK alone is several hundred bytes of serialised group elements, so
+  callers that poll funding state should prefer this read and fetch the VK
+  once via `get_vk`.
+
+* **Preconditions**:
+  * The circle associated with `circle_id` must exist.
+
+### `get_vk`
+
+* **Signature**:
+  ```rust
+  pub fn get_vk(env: Env, circle_id: u64) -> VerificationKey
+  ```
+
+* **Purpose**:
+  Returns the circle's Groth16 verification key. The VK is committed at
+  creation and immutable, so clients fetch it once and cache it (the SDK
+  caches per `(contractId, circleId)`).
 
 * **Preconditions**:
   * The circle associated with `circle_id` must exist.
