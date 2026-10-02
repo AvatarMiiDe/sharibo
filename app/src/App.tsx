@@ -6,6 +6,7 @@ import {
   verificationKeyToContractFormat,
   connect,
   connectReadOnly,
+  clearContractClientCache,
   createCircle,
   fund,
   claim,
@@ -82,7 +83,6 @@ const NETWORK = {
 };
 const TOKEN = config?.testTokenContractId ?? "";
 const LEVELS = TREE_LEVELS;
-const CIRCLE_SIZE = 5;
 const README_URL = "https://github.com/crackedstudio/sharibo#honest-limitations";
 
 const isTestnet = networkOf(NETWORK.networkPassphrase) === "testnet";
@@ -530,8 +530,7 @@ function MemberRing({ members, revealed }: { members: { funded: boolean; pending
       </div>
       {revealed && (
         <p id={captionId} role="note" className={styles.ringCaption}>
-          Payout landed on the address above — cryptographically, it could be tied to <em>any</em>{" "}
-          of the {members.length} members in the ring. An outside observer cannot tell which.
+          {t("ring.caption", { count: members.length })}
         </p>
       )}
     </div>
@@ -890,6 +889,7 @@ export default function App() {
     // Cancel any in-flight proof generation / artifact download.
     claimAbortRef.current?.abort();
     claimAbortRef.current = null;
+    clearContractClientCache();
 
     setPreviousCircleId(circleId);
     clearSession();
@@ -1114,6 +1114,7 @@ export default function App() {
       // Check for network mismatch between wallet and app config
       const mismatch = checkNetworkMatch(networkRes.network, NETWORK.networkPassphrase);
       if (mismatch) {
+        clearContractClientCache();
         throw new Error(
           `Your Freighter wallet is connected to ${mismatch.walletNetwork}, ` +
           `but this app is configured for ${mismatch.appNetwork}. ` +
@@ -1135,6 +1136,7 @@ export default function App() {
           const currentNetworkRes = await getNetworkDetails();
           const currentMismatch = checkNetworkMatch(currentNetworkRes.network, NETWORK.networkPassphrase);
           if (currentMismatch) {
+            clearContractClientCache();
             throw new Error(
               `Your Freighter wallet is connected to ${currentMismatch.walletNetwork}, ` +
               `but this app is configured for ${currentMismatch.appNetwork}. ` +

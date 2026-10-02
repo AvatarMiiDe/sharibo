@@ -36,10 +36,9 @@ const NETWORK = {
 };
 const TOKEN = config.testTokenContractId;
 const LEVELS = TREE_LEVELS;
-const CIRCLE_SIZE = 5;
 
 // All the state and on-chain calls behind a single demo run: create a
-// circle, fund it from 5 members, prove + claim, then optionally replay the
+// circle, fund it from the configured members, prove + claim, then optionally replay the
 // same proof to demonstrate nullifier rejection. Kept as one hook (rather
 // than split further) because every step depends on state written by the
 // previous one — App.tsx only composes the resulting state and callbacks
