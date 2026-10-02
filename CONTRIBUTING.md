@@ -166,6 +166,14 @@ In short:
 
 Running `npm run lint` will catch violations.
 
+## Setup
+
+For setting up your local environment, we recommend running `./scripts/bootstrap.sh` as described in the README. This script will install dependencies, compile the circuit, and set up your environment variables. It also automatically configures git hooks by invoking `scripts/maintenance/install-hooks.sh` to prevent accidentally committing sensitive data such as Stellar secret keys. If you want to configure these hooks manually, you can run:
+
+```bash
+bash scripts/maintenance/install-hooks.sh
+```
+
 ## Setup trouble?
 
 Getting a fresh machine running and tripping on a toolchain issue (`circom`, `wasm32v1-none`, `stellar` vs `soroban`, friendbot limits, testnet resets, missing `circuits/build/`)? See [docs/troubleshooting.md](docs/troubleshooting.md) for symptom → cause → fix walkthroughs.
