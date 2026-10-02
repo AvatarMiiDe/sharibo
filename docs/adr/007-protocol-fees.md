@@ -1,4 +1,4 @@
-# ADR 003: Protocol fees
+# ADR 007: Protocol fees
 
 - **Status:** Accepted (supersedes the 2026-08-31 "not shipping" decision that
   removed `apply_fee`)

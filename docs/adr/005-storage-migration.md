@@ -1,4 +1,4 @@
-# ADR 003: Circle storage schema versioning and migration
+# ADR 005: Circle storage schema versioning and migration
 
 - **Status:** Accepted
 - **Date:** 2026-08-30
