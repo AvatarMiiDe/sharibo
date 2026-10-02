@@ -65,6 +65,27 @@ export function formatXlm(stroops: bigint): string {
   return `${negative ? "-" : ""}${whole}.${fraction}`;
 }
 
+export function formatXlmDisplay(
+  stroops: bigint,
+  locale: string,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  const negative = stroops < 0n;
+  const absolute = negative ? -stroops : stroops;
+  const whole = absolute / STROOPS_PER_XLM;
+  const remainder = absolute % STROOPS_PER_XLM;
+  const asNumber = Number(whole) + Number(remainder) / 1e7;
+  return new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 7,
+    ...options,
+  }).format(negative ? -asNumber : asNumber);
+}
+
+export const DEFAULT_RETRY_POLICY = { maxRetries: 3, baseDelayMs: 500 };
+export const POLL_RETRY_POLICY = { maxRetries: 1, baseDelayMs: 250 };
+export const PATIENT_RETRY_POLICY = { maxRetries: 5, baseDelayMs: 750 };
+
 export const randomFieldElement = vi.fn((): bigint => 42n);
 
 export const poseidon = vi.fn((a: bigint, b: bigint): bigint => a ^ b);
@@ -308,6 +329,40 @@ export {
 export { networkOf, NETWORKS } from "../../packages/client/src/networks.js";
 export { makeCircleId } from "../../packages/client/src/brand.js";
 export type { CircleId } from "../../packages/client/src/brand.js";
+
+// ── Artifact prefetch / event plumbing ───────────────────────────────────────
+//
+// The app subscribes to these on mount (useSdkEvents calls setArtifactOnEvent,
+// ArtifactProgress calls subscribeToArtifactPrefetch). Without them in the
+// manual mock the whole @sharibo/client module throws on first use and App.tsx
+// fails to load at all — the reason the app suite could not collect a single
+// App test. Signatures mirror packages/client/src/{artifacts,prove}.ts.
+import type { ArtifactPrefetchProgress } from "../../packages/client/src/artifacts.js";
+
+const IDLE_PREFETCH: ArtifactPrefetchProgress = {
+  status: "idle",
+  loaded: 0,
+  total: null,
+  fraction: null,
+};
+
+export const configureArtifacts = vi.fn((_config: unknown): void => {});
+
+export const setArtifactOnEvent = vi.fn((_onEvent?: unknown): void => {});
+
+export const getArtifactPrefetchProgress = vi.fn((): ArtifactPrefetchProgress => IDLE_PREFETCH);
+
+export const subscribeToArtifactPrefetch = vi.fn(
+  (listener: (progress: ArtifactPrefetchProgress) => void): (() => void) => {
+    listener(IDLE_PREFETCH);
+    return () => {};
+  },
+);
+
+export const prefetchMembershipArtifacts = vi.fn(async (): Promise<unknown> => ({}));
+
+/** Resolves immediately with empty artifact paths — no wasm/zkey in unit tests. */
+export const getArtifacts = vi.fn(async (_signal?: AbortSignal): Promise<unknown> => ({}));
 
 /** Read-only client stub — the UI only ever passes it back into other stubs. */
 export async function connectReadOnly(_config: unknown): Promise<unknown> {

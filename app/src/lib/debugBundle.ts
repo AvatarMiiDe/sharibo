@@ -20,6 +20,8 @@
  * The output is formatted markdown — paste directly into a bug report body.
  */
 
+import type { LoggedSdkEvent } from "./sdkEventLog";
+
 // ─── types ──────────────────────────────────────────────────────────────────
 
 export interface BundleNetworkConfig {
@@ -57,6 +59,8 @@ export interface BundleInput {
    * e.g. { artifacts: 1200, proving: 34500, submitting: 3100 }
    */
   timings: Record<string, number>;
+  /** Recent SDK observability events (already detail-redacted by useSdkEvents). */
+  recentEvents?: LoggedSdkEvent[];
   /** browser navigator.userAgent */
   userAgent: string;
 }
@@ -75,6 +79,7 @@ export interface DebugBundle {
   potStroops: string;
   artifactHashes: Record<string, string>;
   timings: Record<string, number>;
+  recentEvents: LoggedSdkEvent[];
   userAgent: string;
   /**
    * Non-fatal redaction warnings raised while building the bundle. Present
@@ -88,44 +93,18 @@ export interface DebugBundle {
 
 /**
  * Patterns that must never appear in the serialised bundle.
+ * Shared with `scripts/maintenance/check-secrets.mjs` via secret-patterns.mjs
+ * so a regex fix lands in both consumers.
  *
  * - Stellar secret seeds: start with 'S', 56 base-32 chars.
- *   The Stellar SDK encodes secret keys as Strkey with version byte 0x90
- *   → always starts with 'S', always 56 chars, base-32 alphabet A-Z2-7.
- *   Matched case-insensitively for detection: canonical Strkey is uppercase,
- *   but some logging paths lowercase the value, which would otherwise evade
- *   the pattern. The canonical form is still documented above.
- * - Muxed accounts (M…, 69 chars) and pre-auth tx (T…, 56 chars) are Strkeys
- *   too. A muxed address is not secret key material, but it is account-
- *   identifying, so we redact it deliberately rather than by omission.
- * - Identity scalars: BLS12-381 field elements (identityNullifier /
- *   identitySecret from generateIdentity()). These are 256-bit numbers, so
- *   up to 78 decimal digits — but a scalar sampled in the low range (note
- *   `randomFieldElement` samples 31 bytes per #66) or one with leading zeros
- *   can be shorter. We therefore match a lower decimal floor (≥ 70 digits)
- *   rather than the old ≥ 77, which was a floor, not a match.
- * - Hex scalars: the same field elements rendered as hex (`0x…`, 64 hex
- *   chars) appear in Stellar SDK error payloads and XDR dumps. We match
- *   ≥ 60 hex chars, which is above the 56-char contract ID (C…) and the
- *   64-char tx hash is deliberately excluded by requiring the run to be
- *   longer than 64 OR prefixed with 0x — see HEX_SCALAR_PATTERN below.
+ * - Identity scalars: 77-digit decimal bigints (field elements).
  */
-export const REDACT_PATTERNS: RegExp[] = [
-  // Stellar secret seed: S + 55 chars from base-32 alphabet [A-Z2-7].
-  // Case-insensitive for detection (canonical form is uppercase).
-  /S[A-Z2-7]{55}/gi,
-  // Muxed account Strkey: M + 68 base-32 chars (69 total).
-  /M[A-Z2-7]{68}/gi,
-  // Pre-auth tx Strkey: T + 55 base-32 chars (56 total).
-  /T[A-Z2-7]{55}/gi,
-  // Large decimal integer (≥70 digits) — field-element sized scalar.
-  // Lowered from 77 so low-range / leading-zero scalars are still caught.
-  /\b\d{70,}\b/g,
-  // Hex scalar: 0x-prefixed 60+ hex chars, or a bare 65+ hex run.
-  // Tuned so a 56-char contract ID (C…) and a 64-char tx hash are NOT
-  // flagged, while a 64-hex-char field element rendered as 0x… is.
-  /\b0x[0-9a-fA-F]{60,}\b|\b[0-9a-fA-F]{65,}\b/g,
-];
+// Imported, not just re-exported: `export { X } from "..."` does not create a
+// local binding, so findLeakedSecret below would have referenced an undefined
+// REDACT_PATTERNS and thrown on every call.
+import { REDACT_PATTERNS } from "../../../scripts/maintenance/secret-patterns.mjs";
+
+export { REDACT_PATTERNS };
 
 /**
  * Scan a serialised bundle string for patterns that indicate a secret leaked.
@@ -207,6 +186,11 @@ export function buildDebugBundle(input: BundleInput): DebugBundle {
     potStroops: input.pot.toString(),
     artifactHashes: { ...input.artifactHashes },
     timings: { ...input.timings },
+    recentEvents: (input.recentEvents ?? []).map((e) => ({
+      type: e.type,
+      at: e.at,
+      detail: e.detail ? { ...e.detail } : undefined,
+    })),
     userAgent: input.userAgent,
   };
 
@@ -248,16 +232,20 @@ export function formatBundleAsMarkdown(bundle: DebugBundle): string {
           .join("\n")
       : "  (not loaded)";
 
-  const warningLines =
-    bundle.redactionWarnings && bundle.redactionWarnings.length > 0
-      ? [
-          "",
-          "#### Redaction warnings",
-          "```",
-          ...bundle.redactionWarnings,
-          "```",
-        ]
-      : [];
+  const eventLines =
+    bundle.recentEvents.length > 0
+      ? bundle.recentEvents
+          .map((e) => {
+            const detail = e.detail
+              ? " " +
+                Object.entries(e.detail)
+                  .map(([k, v]) => `${k}=${v}`)
+                  .join(" ")
+              : "";
+            return `  ${e.at} ${e.type}${detail}`;
+          })
+          .join("\n")
+      : "  (none recorded)";
 
   return [
     "### Sharibo debug bundle",
@@ -297,7 +285,11 @@ export function formatBundleAsMarkdown(bundle: DebugBundle): string {
     "```",
     timingLines,
     "```",
-    ...warningLines,
+    "",
+    "#### Recent SDK events",
+    "```",
+    eventLines,
+    "```",
   ].join("\n");
 }
 

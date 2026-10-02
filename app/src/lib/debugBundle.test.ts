@@ -41,6 +41,10 @@ const CLEAN_INPUT: BundleInput = {
     zkey: "sha256:def456",
   },
   timings: { artifacts: 1100, proving: 34200, submitting: 2900 },
+  recentEvents: [
+    { type: "rpc:attempt", at: "2026-01-01T00:00:00.000Z" },
+    { type: "rpc:retry", at: "2026-01-01T00:00:00.100Z", detail: { attempt: 1, delay: 500, error: "429" } },
+  ],
   userAgent: "Mozilla/5.0 (test)",
 };
 
@@ -297,5 +301,38 @@ describe("formatBundleAsMarkdown", () => {
     const bundle = buildDebugBundle(CLEAN_INPUT);
     const md = formatBundleAsMarkdown(bundle);
     expect(md).toContain("_none_");
+  });
+
+  it("includes the lastError text when present", () => {
+    const bundle = buildDebugBundle({ ...CLEAN_INPUT, lastError: "RPC timeout" });
+    const md = formatBundleAsMarkdown(bundle);
+    expect(md).toContain("RPC timeout");
+  });
+
+  it("contains timing entries", () => {
+    const bundle = buildDebugBundle(CLEAN_INPUT);
+    const md = formatBundleAsMarkdown(bundle);
+    expect(md).toContain("proving: 34200ms");
+  });
+
+  it("pastes cleanly — no lone backtick fences are left open", () => {
+    const bundle = buildDebugBundle(CLEAN_INPUT);
+    const md = formatBundleAsMarkdown(bundle);
+    // Count opening and closing triple-backtick fences — must be balanced.
+    const fences = (md.match(/^```/gm) ?? []).length;
+    expect(fences % 2).toBe(0);
+  });
+
+  it("contains no Stellar secret seed in the output", () => {
+    const bundle = buildDebugBundle(CLEAN_INPUT);
+    const md = formatBundleAsMarkdown(bundle);
+    expect(md).not.toMatch(/S[A-Z2-7]{55}/);
+  });
+
+  it("includes recent SDK events in the markdown", () => {
+    const bundle = buildDebugBundle(CLEAN_INPUT);
+    const md = formatBundleAsMarkdown(bundle);
+    expect(md).toContain("#### Recent SDK events");
+    expect(md).toContain("rpc:retry");
   });
 });
