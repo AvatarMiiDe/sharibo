@@ -156,7 +156,7 @@ Below is the documentation for all public contract methods.
       fee_recipient: Address,
   ) -> u64
   ```
-  (See [`docs/adr/003-protocol-fees.md`](../docs/adr/003-protocol-fees.md) for
+  (See [`docs/adr/007-protocol-fees.md`](../docs/adr/007-protocol-fees.md) for
   the fee design.)
 
 * **Purpose**:
@@ -363,19 +363,35 @@ See the [Soroban Documentation](https://developers.stellar.org/) for "Temporary 
 
 ### Running Coverage (LLVM / Rust)
 
-You can generate coverage reports for the Rust contract using `cargo-llvm-cov`. Install it and then run the coverage collection from the `contracts/` directory:
+Contract line coverage is measured with `cargo-llvm-cov` and ratcheted by the
+`contracts.lines` entry in [`coverage-thresholds.json`](../coverage-thresholds.json).
+That number is a **measured floor** (baseline minus a small margin), not an
+aspiration — raise it when coverage improves; never lower it without a
+documented reason.
 
 ```bash
-# Install the tool (once)
+# Install once (also checked optionally by `just doctor` / scripts/doctor.ts)
 cargo install cargo-llvm-cov
 
-# From the repository root
-cd contracts
+# From repo root — enforces the floor and fails if llvm-cov is missing
+just coverage
 
-# Run tests and produce coverage reports (HTML + lcov)
-cargo llvm-cov --workspace --tests --lcov --output-path coverage --html
-
-# Combined coverage will be written to `contracts/coverage/` (open the HTML report in a browser).
+# Or manually from contracts/
+THRESHOLD=$(python3 -c 'import json; print(json.load(open("../coverage-thresholds.json"))["contracts"]["lines"])')
+mkdir -p coverage
+cargo llvm-cov --workspace --tests \
+  --ignore-filename-regex='(/tests?/|test\.rs$)' \
+  --lcov --output-path coverage/lcov.info
+cargo llvm-cov report \
+  --ignore-filename-regex='(/tests?/|test\.rs$)' \
+  --fail-under-lines "$THRESHOLD"
 ```
 
-Note: `cargo-llvm-cov` depends on LLVM tooling available in your environment. See the `cargo-llvm-cov` documentation for platform-specific notes.
+The `--ignore-filename-regex` keeps the floor on production `lib.rs` only
+(tests would otherwise inflate the percentage). Measured baseline on
+2026-09-28: **74.53%** lines on `lib.rs` → floor **72** in
+`coverage-thresholds.json`. See [`COVERAGE_GAPS.md`](COVERAGE_GAPS.md) for
+uncovered `panic_with_error!` arms.
+
+CI (`.github/workflows/coverage.yml`) runs the same commands and uploads
+`contracts/coverage/lcov.info` as an artifact for reviewers.
