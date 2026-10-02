@@ -1,17 +1,9 @@
 import type { FeeEstimate } from "@sharibo/client";
+import { formatXlmDisplay } from "@sharibo/client";
 import type { Member } from "../types.js";
 import styles from "./ClaimSection.module.css";
 import { useI18n } from "../i18n.js";
 import type { ClaimStage } from "../types.js";
-
-const STROOPS_PER_XLM = 10_000_000n;
-
-/** Format a stroop amount as a human-readable XLM string, e.g. "0.0123456 XLM". */
-function formatXlm(stroops: bigint): string {
-  const whole = stroops / STROOPS_PER_XLM;
-  const frac = stroops % STROOPS_PER_XLM;
-  return `${whole}.${frac.toString().padStart(7, "0")} XLM`;
-}
 
 export function ClaimSection({
   members,
@@ -32,7 +24,13 @@ export function ClaimSection({
   onClaim: () => void;
   feeEstimate?: FeeEstimate | null;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+
+  /** Format a stroop amount as a human-readable XLM string, e.g. "0.0123456 XLM". */
+  function formatXlm(stroops: bigint): string {
+    return `${formatXlmDisplay(stroops, locale)} XLM`;
+  }
+
   return (
     <>
       <h2>Claim</h2>
@@ -59,7 +57,7 @@ export function ClaimSection({
       </button>
       {busy && (
         <p className={styles.techline}>
-          Groth16 · BLS12-381 · 1,452 constraints · proving locally in your browser, nothing sent
+          Groth16 · BLS12-381 · 3,757 constraints · proving locally in your browser, nothing sent
           anywhere until the proof is done
         </p>
       )}

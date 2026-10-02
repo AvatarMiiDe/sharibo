@@ -20,6 +20,40 @@ import {
 import { Keypair } from "@stellar/stellar-sdk";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
 
+export interface ShariboSDKOptions {
+  /**
+   * Default retry policy for every contract call made through this instance.
+   * Individual methods accept an optional per-call override that takes precedence.
+   */
+  retryPolicy?: RetryPolicy;
+}
+
+export interface CreateCircleArgs {
+  admin: string;
+  token: string;
+  root: bigint;
+  contribution: bigint;
+  size: number;
+  vk: ContractVerificationKey;
+  /** Protocol fee in basis points (0-10_000; 0 = no fee). */
+  feeBps: number;
+  /** Address the protocol fee is paid to (required when feeBps > 0). */
+  feeRecipient: string;
+}
+
+export interface FundArgs {
+  circleId: bigint;
+  from: string;
+}
+
+export interface ClaimArgs {
+  circleId: bigint;
+  recipient: string;
+  nullifierHash: bigint;
+  externalNullifier: bigint;
+  proof: ContractProof;
+}
+
 /**
  * Object-oriented facade over the free functions in `contract.ts`.
  *
@@ -30,12 +64,25 @@ import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "./retry.js";
  * recommended entry point for application code.
  */
 export class ShariboSDK {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly client: any;
-  private readonly retryPolicy: RetryPolicy;
+  /** The network configuration this instance was created with. */
+  readonly networkConfig: ShariboNetworkConfig;
+  /** The raw contract client. Exposed for escape hatches the facade doesn't cover yet. */
+  readonly client: ShariboClient;
+  /** The default retry policy applied when a call does not pass its own. */
+  readonly retryPolicy: RetryPolicy;
+  /** Public key of the signer this instance transacts as. */
+  readonly publicKey: string;
+  /** The keypair or wallet signer this instance signs with. */
+  readonly signer: Keypair | ShariboSigner;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private constructor(client: any, retryPolicy: RetryPolicy) {
+  private constructor(
+    networkConfig: ShariboNetworkConfig,
+    client: ShariboClient,
+    retryPolicy: RetryPolicy,
+    publicKey: string,
+    signer: Keypair | ShariboSigner,
+  ) {
+    this.networkConfig = networkConfig;
     this.client = client;
     this.retryPolicy = retryPolicy;
   }
@@ -49,57 +96,51 @@ export class ShariboSDK {
     return new ShariboSDK(client, retryPolicy);
   }
 
-  createCircle(...args: Parameters<typeof createCircle> extends [unknown, ...infer R] ? R : never) {
-    return createCircle(this.client, this.retryPolicy, ...args);
+  private policy(override?: RetryPolicy): RetryPolicy {
+    return override ?? this.retryPolicy;
   }
 
-  fund(...args: Parameters<typeof fund> extends [unknown, ...infer R] ? R : never) {
-    return fund(this.client, this.retryPolicy, ...args);
+  /** Creates a new circle. Mirrors the `createCircle` free function. */
+  createCircle(args: CreateCircleArgs, retryPolicy?: RetryPolicy): Promise<TxResult<bigint>> {
+    return createCircle(this.client, args, this.policy(retryPolicy));
   }
 
-  claim(...args: Parameters<typeof claim> extends [unknown, ...infer R] ? R : never) {
-    return claim(this.client, this.retryPolicy, ...args);
+  /** Funds a circle from `args.from`. Mirrors the `fund` free function. */
+  fund(args: FundArgs, retryPolicy?: RetryPolicy): Promise<TxResult<void>> {
+    return fund(this.client, args, this.policy(retryPolicy));
   }
 
-  getCircle(...args: Parameters<typeof getCircle> extends [unknown, ...infer R] ? R : never) {
-    return getCircle(this.client, this.retryPolicy, ...args);
+  /** Claims the pot for `args.recipient`. Mirrors the `claim` free function. */
+  claim(args: ClaimArgs, retryPolicy?: RetryPolicy): Promise<TxResult<void>> {
+    return claim(this.client, args, this.policy(retryPolicy));
   }
 
-  getCircleCount(...args: Parameters<typeof getCircleCount> extends [unknown, ...infer R] ? R : never) {
-    return getCircleCount(this.client, this.retryPolicy, ...args);
+  /** Reads a circle's current state. Mirrors the `getCircle` free function. */
+  getCircle(circleId: bigint, retryPolicy?: RetryPolicy): Promise<CircleView> {
+    return getCircle(this.client, circleId, this.policy(retryPolicy));
   }
 
-  hasClaimed(...args: Parameters<typeof hasClaimed> extends [unknown, ...infer R] ? R : never) {
-    return hasClaimed(this.client, this.retryPolicy, ...args);
+  /** Pure read: how many circles have been created on this contract. */
+  getCircleCount(retryPolicy?: RetryPolicy): Promise<bigint> {
+    return getCircleCount(this.client, this.policy(retryPolicy));
   }
 
-  getStatus(...args: Parameters<typeof getStatus> extends [unknown, ...infer R] ? R : never) {
-    return getStatus(this.client, this.retryPolicy, ...args);
+  /**
+   * Contract-level status: the number of circles ever created on the deployed
+   * contract. Listed in issue #284's sketch of the facade API; implemented
+   * over the contract's existing read (there is no `get_status` contract
+   * method), so this is an alias for `getCircleCount`.
+   */
+  getStatus(retryPolicy?: RetryPolicy): Promise<bigint> {
+    return this.getCircleCount(retryPolicy);
   }
 
-  cancelCircle(...args: Parameters<typeof cancelCircle> extends [unknown, ...infer R] ? R : never) {
-    return cancelCircle(this.client, this.retryPolicy, ...args);
-  }
-
-  getCircleStatus(...args: Parameters<typeof getCircleStatus> extends [unknown, ...infer R] ? R : never) {
-    return getCircleStatus(this.client, this.retryPolicy, ...args);
-  }
-
-  getRound(...args: Parameters<typeof getRound> extends [unknown, ...infer R] ? R : never) {
-    return getRound(this.client, this.retryPolicy, ...args);
-  }
-
-  getPot(...args: Parameters<typeof getPot> extends [unknown, ...infer R] ? R : never) {
-    return getPot(this.client, this.retryPolicy, ...args);
-  }
-
-  getContributors(...args: Parameters<typeof getContributors> extends [unknown, ...infer R] ? R : never) {
-    return getContributors(this.client, this.retryPolicy, ...args);
-  }
-
-  estimateClaimFee(...args: Parameters<typeof estimateClaimFee> extends [unknown, ...infer R] ? R : never) {
-    return estimateClaimFee(this.client, this.retryPolicy, ...args);
+  /** Pure read: whether `nullifierHash` already claimed in this circle. */
+  hasClaimed(
+    circleId: bigint,
+    nullifierHash: bigint,
+    retryPolicy?: RetryPolicy,
+  ): Promise<boolean> {
+    return hasClaimed(this.client, circleId, nullifierHash, this.policy(retryPolicy));
   }
 }
-
-export type { TxResult };

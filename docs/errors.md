@@ -18,6 +18,7 @@ strings from Stellar RPC failures and maps them to typed subclasses in
 | 7    | `Overflow`            | `OverflowError`           | Checked pot arithmetic overflowed (absurd contribution / size).       |
 | 8    | `CircleCancelled`     | `CircleCancelledError`    | `cancel_circle` or `fund`/`claim` called on a cancelled circle.     |
 | 9    | `InvalidFeeParams`    | — (generic `ContractError`) | `create_circle` rejected a `fee_bps` outside `0..=10_000`.         |
+| 10   | `InvalidCircleParams` | `InvalidCircleParamsError`  | `create_circle` rejected size / contribution / `vk.ic` shape. Prefer client-side `validateContributionAmount` so the UI names the cause before a fee is paid. |
 
 All subclasses extend `ContractError`, which in turn extends `ShariboError`.
 
@@ -33,7 +34,9 @@ All subclasses extend `ContractError`, which in turn extends `ShariboError`.
    simulation call (`withRetry`) and the submission (`signAndSend()`) in a
    `try/catch` that feeds through `decodeContractError()`.
 4. Transient RPC failures (429, 5xx) are retried with exponential backoff
-   before being wrapped in `RpcError`.
+   before being wrapped in `RpcError`. Defaults: 3 retries, 500ms base delay,
+   worst-case sleep ~3.5s (`DEFAULT_RETRY_POLICY`). Callers can override per
+   client or per call; see `packages/client/README.md` §Retries and observability.
 
 ## Usage
 
